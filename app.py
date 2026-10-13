@@ -1,11 +1,12 @@
 import re
 import time
 
-import boto3
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from pyvis.network import Network
+
+from src.aws.athena import create_athena_client, execute_query
 
 # ============================================================
 # CONFIG
@@ -60,10 +61,12 @@ st.set_page_config(
 # AWS CLIENT
 # ============================================================
 
-athena = boto3.client(
-    "athena",
-    region_name=AWS_REGION
-)
+@st.cache_resource
+def get_athena_client():
+
+    return create_athena_client(
+        AWS_REGION
+    )
 
 
 # ============================================================
@@ -72,115 +75,11 @@ athena = boto3.client(
 
 def run_athena_query(query: str) -> pd.DataFrame:
 
-    response = athena.start_query_execution(
-        QueryString=query,
-        QueryExecutionContext={
-            "Database": ATHENA_DATABASE
-        },
-        ResultConfiguration={
-            "OutputLocation": ATHENA_OUTPUT
-        }
-    )
-
-    query_execution_id = response[
-        "QueryExecutionId"
-    ]
-
-    while True:
-
-        response = athena.get_query_execution(
-            QueryExecutionId=query_execution_id
-        )
-
-        status = response[
-            "QueryExecution"
-        ][
-            "Status"
-        ][
-            "State"
-        ]
-
-        if status == "SUCCEEDED":
-            break
-
-        if status in [
-            "FAILED",
-            "CANCELLED"
-        ]:
-
-            reason = response[
-                "QueryExecution"
-            ][
-                "Status"
-            ].get(
-                "StateChangeReason",
-                "Unknown Athena error"
-            )
-
-            raise RuntimeError(
-                f"Athena query {status}: {reason}"
-            )
-
-        time.sleep(0.5)
-
-
-    # --------------------------------------------------------
-    # Get results with pagination
-    # --------------------------------------------------------
-
-    rows = []
-
-    paginator = athena.get_paginator(
-        "get_query_results"
-    )
-
-    first_page = True
-    columns = []
-
-    for page in paginator.paginate(
-        QueryExecutionId=query_execution_id
-    ):
-
-        result_set = page["ResultSet"]
-
-        if first_page:
-
-            columns = [
-                col["Name"]
-                for col in result_set[
-                    "ResultSetMetadata"
-                ][
-                    "ColumnInfo"
-                ]
-            ]
-
-        page_rows = result_set["Rows"]
-
-        # Athena returns the header as first row
-        if first_page:
-            page_rows = page_rows[1:]
-            first_page = False
-
-        for row in page_rows:
-
-            values = [
-                item.get(
-                    "VarCharValue",
-                    None
-                )
-                for item in row["Data"]
-            ]
-
-            # Athena can omit trailing null columns
-            while len(values) < len(columns):
-                values.append(None)
-
-            rows.append(values)
-
-
-    return pd.DataFrame(
-        rows,
-        columns=columns
+    return execute_query(
+        get_athena_client(),
+        query=query,
+        database=ATHENA_DATABASE,
+        output_location=ATHENA_OUTPUT
     )
 
 
