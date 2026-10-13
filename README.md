@@ -42,6 +42,19 @@ BQ1 Gold + BQ2 Gold
 The BQ1-to-BQ2 handoff supplies the transaction ID, source account key,
 target account key, and transaction timestamp for the selected alert.
 
+## Local environment
+
+Recommended Python: 3.12.4
+
+Create an isolated environment and install the validated direct dependencies:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+streamlit run app.py
+```
+
 ## Run the current app
 
 Install the dependencies in `requirements.txt`, configure AWS access through
