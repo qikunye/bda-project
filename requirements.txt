@@ -1,0 +1,9 @@
+# Runtime dependencies
+boto3
+botocore
+pandas
+streamlit
+pyvis
+
+# Development tooling
+ruff==0.16.8
