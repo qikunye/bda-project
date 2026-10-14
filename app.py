@@ -7,6 +7,7 @@ import streamlit.components.v1 as components
 from pyvis.network import Network
 
 from src.aws.athena import create_athena_client, execute_query
+from src.bq2.queries import build_alert_lookup_query, build_case_edges_query
 
 # ============================================================
 # CONFIG
@@ -123,31 +124,10 @@ def normalize_transaction_timestamp(timestamp):
 )
 def get_alert(transaction_id):
 
-    query = f"""
-    SELECT
+    query = build_alert_lookup_query(
         transaction_id,
-
-        source_account_key,
-        target_account_key,
-
-        source_entity_id,
-        source_entity_name,
-
-        target_entity_id,
-        target_entity_name,
-
-        transaction_timestamp,
-
-        amount_paid,
-        payment_currency,
-        payment_format
-
-    FROM {ATHENA_TABLE}
-
-    WHERE transaction_id = '{transaction_id}'
-
-    LIMIT 1
-    """
+        table_name=ATHENA_TABLE
+    )
 
     return run_athena_query(query)
 
@@ -168,211 +148,14 @@ def get_case_edges(
     window_minutes
 ):
 
-    query = f"""
-    WITH parameters AS (
-
-        SELECT
-            '{alert_transaction_id}'
-                AS alert_transaction_id,
-
-            '{alert_sender}'
-                AS alert_sender,
-
-            '{alert_receiver}'
-                AS alert_receiver,
-
-            TIMESTAMP '{alert_timestamp}'
-                AS alert_timestamp,
-
-            {window_minutes}
-                AS window_minutes
-    ),
-
-    alert_edge AS (
-
-        SELECT
-            'ALERT' AS edge_role,
-
-            g.source_account_key,
-            g.target_account_key,
-
-            g.source_entity_id,
-            g.source_entity_name,
-
-            g.target_entity_id,
-            g.target_entity_name,
-
-            g.transaction_id,
-            g.transaction_timestamp,
-
-            0 AS gap_minutes,
-
-            g.amount_paid,
-            g.payment_currency,
-            g.payment_format
-
-        FROM {ATHENA_TABLE} g
-
-        CROSS JOIN parameters p
-
-        WHERE
-            g.transaction_id =
-            p.alert_transaction_id
-
-            AND
-            g.txn_date =
-            CAST(
-                p.alert_timestamp
-                AS DATE
-            )
-    ),
-
-    upstream_edges AS (
-
-        SELECT
-            'UPSTREAM' AS edge_role,
-
-            g.source_account_key,
-            g.target_account_key,
-
-            g.source_entity_id,
-            g.source_entity_name,
-
-            g.target_entity_id,
-            g.target_entity_name,
-
-            g.transaction_id,
-            g.transaction_timestamp,
-
-            DATE_DIFF(
-                'minute',
-                g.transaction_timestamp,
-                p.alert_timestamp
-            ) AS gap_minutes,
-
-            g.amount_paid,
-            g.payment_currency,
-            g.payment_format
-
-        FROM {ATHENA_TABLE} g
-
-        CROSS JOIN parameters p
-
-        WHERE
-            g.target_account_key =
-            p.alert_sender
-
-            AND g.txn_date BETWEEN
-
-                CAST(
-                    DATE_ADD(
-                        'minute',
-                        -p.window_minutes,
-                        p.alert_timestamp
-                    )
-                    AS DATE
-                )
-
-                AND
-
-                CAST(
-                    p.alert_timestamp
-                    AS DATE
-                )
-
-            AND
-            g.transaction_timestamp
-            <= p.alert_timestamp
-
-            AND
-            DATE_DIFF(
-                'minute',
-                g.transaction_timestamp,
-                p.alert_timestamp
-            )
-            <= p.window_minutes
-    ),
-
-    downstream_edges AS (
-
-        SELECT
-            'DOWNSTREAM'
-                AS edge_role,
-
-            g.source_account_key,
-            g.target_account_key,
-
-            g.source_entity_id,
-            g.source_entity_name,
-
-            g.target_entity_id,
-            g.target_entity_name,
-
-            g.transaction_id,
-            g.transaction_timestamp,
-
-            DATE_DIFF(
-                'minute',
-                p.alert_timestamp,
-                g.transaction_timestamp
-            ) AS gap_minutes,
-
-            g.amount_paid,
-            g.payment_currency,
-            g.payment_format
-
-        FROM {ATHENA_TABLE} g
-
-        CROSS JOIN parameters p
-
-        WHERE
-            g.source_account_key =
-            p.alert_receiver
-
-            AND g.txn_date BETWEEN
-
-                CAST(
-                    p.alert_timestamp
-                    AS DATE
-                )
-
-                AND
-
-                CAST(
-                    DATE_ADD(
-                        'minute',
-                        p.window_minutes,
-                        p.alert_timestamp
-                    )
-                    AS DATE
-                )
-
-            AND
-            g.transaction_timestamp
-            >= p.alert_timestamp
-
-            AND
-            DATE_DIFF(
-                'minute',
-                p.alert_timestamp,
-                g.transaction_timestamp
-            )
-            <= p.window_minutes
+    query = build_case_edges_query(
+        alert_sender,
+        alert_receiver,
+        alert_timestamp,
+        alert_transaction_id,
+        window_minutes,
+        table_name=ATHENA_TABLE
     )
-
-    SELECT *
-    FROM alert_edge
-
-    UNION ALL
-
-    SELECT *
-    FROM upstream_edges
-
-    UNION ALL
-
-    SELECT *
-    FROM downstream_edges
-    """
 
     return run_athena_query(query)
 
