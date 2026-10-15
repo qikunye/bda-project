@@ -1,0 +1,646 @@
+{
+  "alert": {
+    "amount": "100.25",
+    "amount_status": "valid",
+    "currency": "USD",
+    "payment_format": "WIRE",
+    "source_account_key": "SYNTHETIC_ACCOUNT_A",
+    "target_account_key": "SYNTHETIC_ACCOUNT_B",
+    "transaction_id": "txn_synthetic_alert",
+    "transaction_timestamp": "2022-09-03T12:00:00Z"
+  },
+  "bq1": {
+    "detail": null,
+    "metadata": {
+      "model_name": "synthetic_xgboost",
+      "model_version": "synthetic-v1",
+      "risk_rank": 12,
+      "risk_rank_scope": "global_all_scored_rows",
+      "risk_score": 0.84,
+      "risk_score_semantics": "ranking_signal_not_calibrated_probability",
+      "source_account_key": "SYNTHETIC_ACCOUNT_A",
+      "source_table": "is459_aml_gold.bq1_risk_scores_medium_v1",
+      "target_account_key": "SYNTHETIC_ACCOUNT_B",
+      "transaction_id": "txn_synthetic_alert",
+      "transaction_timestamp": "2022-09-03 12:00:00"
+    },
+    "model_explanations": {
+      "detail": "No verified feature-attribution evidence is available in the current BQ1 serving contract.",
+      "explanations": null,
+      "status": "unavailable"
+    },
+    "status": "available"
+  },
+  "bq2": {
+    "candidates": [
+      {
+        "account_key": "SYNTHETIC_UPSTREAM_1",
+        "amount_aggregation_scope": "valid supporting amounts only; missing and invalid amount counts indicate completeness",
+        "amount_totals_by_currency": {
+          "SGD": "60.00",
+          "USD": "55.75"
+        },
+        "candidate_rank": 1,
+        "closest_gap_minutes": 180,
+        "distinct_relationship_count": 2,
+        "downstream_supporting_transaction_count": 1,
+        "earliest_supporting_transaction_timestamp": "2022-09-02T12:00:00Z",
+        "evidence_semantics": "observed_transaction_relationship_not_a_risk_assessment",
+        "invalid_amount_count": 0,
+        "latest_supporting_transaction_timestamp": "2022-09-03T16:00:00Z",
+        "missing_amount_count": 0,
+        "payment_formats": [
+          "ACH",
+          "CARD",
+          "WIRE"
+        ],
+        "ranking_inputs": {
+          "account_key_tiebreaker": "SYNTHETIC_UPSTREAM_1",
+          "closest_gap_minutes": 180,
+          "supporting_transaction_count": 3
+        },
+        "ranking_policy_semantics": "provisional_investigation_order_not_a_validated_risk_score",
+        "ranking_policy_version": "support_count_gap_account_v1",
+        "relationship_direction": "both",
+        "relationship_ids": [
+          "rel_8551c89bab9de6a99ba1d83cbc24b9da3b9c9fb8bcd8d48bbfcb265cf94ba6b9",
+          "rel_8b72ed4a375222a5372a17651a636d80672058d4abc61fe70ef1f134014ed13d",
+          "rel_9db9563cf9a3a346924d45ca2ea22338d4c4b4d8cf1878efe7cacc32562c6295"
+        ],
+        "repeated_transfer_indicator": true,
+        "supporting_transaction_count": 3,
+        "transaction_counts_by_currency": {
+          "SGD": 1,
+          "USD": 2
+        },
+        "transaction_ids": [
+          "txn_synthetic_u2",
+          "txn_synthetic_u1",
+          "txn_synthetic_d4"
+        ],
+        "transactions_with_missing_currency_count": 0,
+        "upstream_supporting_transaction_count": 2,
+        "valid_amount_count": 3,
+        "zero_amount_count": 0
+      },
+      {
+        "account_key": "SYNTHETIC_DOWNSTREAM_1",
+        "amount_aggregation_scope": "valid supporting amounts only; missing and invalid amount counts indicate completeness",
+        "amount_totals_by_currency": {
+          "EUR": "25.50"
+        },
+        "candidate_rank": 2,
+        "closest_gap_minutes": 60,
+        "distinct_relationship_count": 1,
+        "downstream_supporting_transaction_count": 2,
+        "earliest_supporting_transaction_timestamp": "2022-09-03T13:00:00Z",
+        "evidence_semantics": "observed_transaction_relationship_not_a_risk_assessment",
+        "invalid_amount_count": 1,
+        "latest_supporting_transaction_timestamp": "2022-09-03T14:00:00Z",
+        "missing_amount_count": 0,
+        "payment_formats": [
+          "ACH"
+        ],
+        "ranking_inputs": {
+          "account_key_tiebreaker": "SYNTHETIC_DOWNSTREAM_1",
+          "closest_gap_minutes": 60,
+          "supporting_transaction_count": 2
+        },
+        "ranking_policy_semantics": "provisional_investigation_order_not_a_validated_risk_score",
+        "ranking_policy_version": "support_count_gap_account_v1",
+        "relationship_direction": "downstream",
+        "relationship_ids": [
+          "rel_e552fdf9add94b4b29ea96d984001e59f005e99fbe3a01f3c032af4311df932b"
+        ],
+        "repeated_transfer_indicator": true,
+        "supporting_transaction_count": 2,
+        "transaction_counts_by_currency": {
+          "EUR": 2
+        },
+        "transaction_ids": [
+          "txn_synthetic_d1",
+          "txn_synthetic_d2"
+        ],
+        "transactions_with_missing_currency_count": 0,
+        "upstream_supporting_transaction_count": 0,
+        "valid_amount_count": 1,
+        "zero_amount_count": 0
+      },
+      {
+        "account_key": "SYNTHETIC_UPSTREAM_2",
+        "amount_aggregation_scope": "valid supporting amounts only; missing and invalid amount counts indicate completeness",
+        "amount_totals_by_currency": {},
+        "candidate_rank": 3,
+        "closest_gap_minutes": 60,
+        "distinct_relationship_count": 1,
+        "downstream_supporting_transaction_count": 0,
+        "earliest_supporting_transaction_timestamp": "2022-09-03T11:00:00Z",
+        "evidence_semantics": "observed_transaction_relationship_not_a_risk_assessment",
+        "invalid_amount_count": 0,
+        "latest_supporting_transaction_timestamp": "2022-09-03T11:00:00Z",
+        "missing_amount_count": 1,
+        "payment_formats": [
+          "WIRE"
+        ],
+        "ranking_inputs": {
+          "account_key_tiebreaker": "SYNTHETIC_UPSTREAM_2",
+          "closest_gap_minutes": 60,
+          "supporting_transaction_count": 1
+        },
+        "ranking_policy_semantics": "provisional_investigation_order_not_a_validated_risk_score",
+        "ranking_policy_version": "support_count_gap_account_v1",
+        "relationship_direction": "upstream",
+        "relationship_ids": [
+          "rel_db30de48685a3acdd1be629d0c244681003118a96569ebec4dd0879c8c142dd4"
+        ],
+        "repeated_transfer_indicator": false,
+        "supporting_transaction_count": 1,
+        "transaction_counts_by_currency": {
+          "USD": 1
+        },
+        "transaction_ids": [
+          "txn_synthetic_u3"
+        ],
+        "transactions_with_missing_currency_count": 0,
+        "upstream_supporting_transaction_count": 1,
+        "valid_amount_count": 0,
+        "zero_amount_count": 0
+      },
+      {
+        "account_key": "SYNTHETIC_DOWNSTREAM_2",
+        "amount_aggregation_scope": "valid supporting amounts only; missing and invalid amount counts indicate completeness",
+        "amount_totals_by_currency": {
+          "USD": "0"
+        },
+        "candidate_rank": 4,
+        "closest_gap_minutes": 180,
+        "distinct_relationship_count": 1,
+        "downstream_supporting_transaction_count": 1,
+        "earliest_supporting_transaction_timestamp": "2022-09-03T15:00:00Z",
+        "evidence_semantics": "observed_transaction_relationship_not_a_risk_assessment",
+        "invalid_amount_count": 0,
+        "latest_supporting_transaction_timestamp": "2022-09-03T15:00:00Z",
+        "missing_amount_count": 0,
+        "payment_formats": [
+          "CARD"
+        ],
+        "ranking_inputs": {
+          "account_key_tiebreaker": "SYNTHETIC_DOWNSTREAM_2",
+          "closest_gap_minutes": 180,
+          "supporting_transaction_count": 1
+        },
+        "ranking_policy_semantics": "provisional_investigation_order_not_a_validated_risk_score",
+        "ranking_policy_version": "support_count_gap_account_v1",
+        "relationship_direction": "downstream",
+        "relationship_ids": [
+          "rel_80143ec0c90f2855ac0816f2f906c4ff4b98454d5311e722459acc6ed4fa6189"
+        ],
+        "repeated_transfer_indicator": false,
+        "supporting_transaction_count": 1,
+        "transaction_counts_by_currency": {
+          "USD": 1
+        },
+        "transaction_ids": [
+          "txn_synthetic_d3"
+        ],
+        "transactions_with_missing_currency_count": 0,
+        "upstream_supporting_transaction_count": 0,
+        "valid_amount_count": 1,
+        "zero_amount_count": 1
+      }
+    ],
+    "case_statistics": {
+      "alert_transaction_count": 1,
+      "amount_aggregation_scope": "unique transactions including the alert; totals contain only valid amounts and never combine currencies",
+      "amount_totals_by_currency": {
+        "EUR": "25.50",
+        "SGD": "60.00",
+        "USD": "156.00"
+      },
+      "distinct_payment_format_count": 3,
+      "downstream_connected_account_count": 3,
+      "downstream_transaction_count": 4,
+      "earliest_supporting_transaction_timestamp": "2022-09-02T12:00:00Z",
+      "invalid_amount_count": 1,
+      "latest_supporting_transaction_timestamp": "2022-09-03T16:00:00Z",
+      "missing_amount_count": 1,
+      "neighbour_transactions_excluding_alert": 7,
+      "payment_format_scope": "unique transactions including the alert",
+      "repeated_relationship_count": 2,
+      "repeated_relationship_semantics": "directional source-target pairs with more than one unique transaction; currency does not change pair identity",
+      "total_transactions_including_alert": 8,
+      "unique_connected_account_count": 4,
+      "upstream_connected_account_count": 2,
+      "upstream_transaction_count": 3,
+      "valid_amount_count": 6,
+      "valid_amount_without_currency_count": 0,
+      "zero_amount_count": 1
+    },
+    "relationships": [
+      {
+        "amount_total": "60.00",
+        "amount_total_is_complete": true,
+        "closest_gap_minutes": 1440,
+        "currency": "SGD",
+        "direction": "upstream",
+        "invalid_amount_count": 0,
+        "known_amount_total": "60.00",
+        "missing_amount_count": 0,
+        "payment_formats": [
+          "CARD"
+        ],
+        "relationship_id": "rel_8551c89bab9de6a99ba1d83cbc24b9da3b9c9fb8bcd8d48bbfcb265cf94ba6b9",
+        "source_account_key": "SYNTHETIC_UPSTREAM_1",
+        "target_account_key": "SYNTHETIC_ACCOUNT_A",
+        "transaction_count": 1,
+        "transaction_ids": [
+          "txn_synthetic_u2"
+        ],
+        "transaction_timestamps": [
+          "2022-09-02T12:00:00Z"
+        ],
+        "valid_amount_count": 1,
+        "zero_amount_count": 0
+      },
+      {
+        "amount_total": "40.00",
+        "amount_total_is_complete": true,
+        "closest_gap_minutes": 180,
+        "currency": "USD",
+        "direction": "upstream",
+        "invalid_amount_count": 0,
+        "known_amount_total": "40.00",
+        "missing_amount_count": 0,
+        "payment_formats": [
+          "ACH"
+        ],
+        "relationship_id": "rel_8b72ed4a375222a5372a17651a636d80672058d4abc61fe70ef1f134014ed13d",
+        "source_account_key": "SYNTHETIC_UPSTREAM_1",
+        "target_account_key": "SYNTHETIC_ACCOUNT_A",
+        "transaction_count": 1,
+        "transaction_ids": [
+          "txn_synthetic_u1"
+        ],
+        "transaction_timestamps": [
+          "2022-09-03T09:00:00Z"
+        ],
+        "valid_amount_count": 1,
+        "zero_amount_count": 0
+      },
+      {
+        "amount_total": null,
+        "amount_total_is_complete": false,
+        "closest_gap_minutes": 60,
+        "currency": "USD",
+        "direction": "upstream",
+        "invalid_amount_count": 0,
+        "known_amount_total": null,
+        "missing_amount_count": 1,
+        "payment_formats": [
+          "WIRE"
+        ],
+        "relationship_id": "rel_db30de48685a3acdd1be629d0c244681003118a96569ebec4dd0879c8c142dd4",
+        "source_account_key": "SYNTHETIC_UPSTREAM_2",
+        "target_account_key": "SYNTHETIC_ACCOUNT_A",
+        "transaction_count": 1,
+        "transaction_ids": [
+          "txn_synthetic_u3"
+        ],
+        "transaction_timestamps": [
+          "2022-09-03T11:00:00Z"
+        ],
+        "valid_amount_count": 0,
+        "zero_amount_count": 0
+      },
+      {
+        "amount_total": "100.25",
+        "amount_total_is_complete": true,
+        "closest_gap_minutes": 0,
+        "currency": "USD",
+        "direction": "alert",
+        "invalid_amount_count": 0,
+        "known_amount_total": "100.25",
+        "missing_amount_count": 0,
+        "payment_formats": [
+          "WIRE"
+        ],
+        "relationship_id": "rel_dc0c3104444b1f2f658732fd229816a52f0947ca8aba537e743aad6f0e3b9d85",
+        "source_account_key": "SYNTHETIC_ACCOUNT_A",
+        "target_account_key": "SYNTHETIC_ACCOUNT_B",
+        "transaction_count": 1,
+        "transaction_ids": [
+          "txn_synthetic_alert"
+        ],
+        "transaction_timestamps": [
+          "2022-09-03T12:00:00Z"
+        ],
+        "valid_amount_count": 1,
+        "zero_amount_count": 0
+      },
+      {
+        "amount_total": null,
+        "amount_total_is_complete": false,
+        "closest_gap_minutes": 60,
+        "currency": "EUR",
+        "direction": "downstream",
+        "invalid_amount_count": 1,
+        "known_amount_total": "25.50",
+        "missing_amount_count": 0,
+        "payment_formats": [
+          "ACH"
+        ],
+        "relationship_id": "rel_e552fdf9add94b4b29ea96d984001e59f005e99fbe3a01f3c032af4311df932b",
+        "source_account_key": "SYNTHETIC_ACCOUNT_B",
+        "target_account_key": "SYNTHETIC_DOWNSTREAM_1",
+        "transaction_count": 2,
+        "transaction_ids": [
+          "txn_synthetic_d1",
+          "txn_synthetic_d2"
+        ],
+        "transaction_timestamps": [
+          "2022-09-03T13:00:00Z",
+          "2022-09-03T14:00:00Z"
+        ],
+        "valid_amount_count": 1,
+        "zero_amount_count": 0
+      },
+      {
+        "amount_total": "0",
+        "amount_total_is_complete": true,
+        "closest_gap_minutes": 180,
+        "currency": "USD",
+        "direction": "downstream",
+        "invalid_amount_count": 0,
+        "known_amount_total": "0",
+        "missing_amount_count": 0,
+        "payment_formats": [
+          "CARD"
+        ],
+        "relationship_id": "rel_80143ec0c90f2855ac0816f2f906c4ff4b98454d5311e722459acc6ed4fa6189",
+        "source_account_key": "SYNTHETIC_ACCOUNT_B",
+        "target_account_key": "SYNTHETIC_DOWNSTREAM_2",
+        "transaction_count": 1,
+        "transaction_ids": [
+          "txn_synthetic_d3"
+        ],
+        "transaction_timestamps": [
+          "2022-09-03T15:00:00Z"
+        ],
+        "valid_amount_count": 1,
+        "zero_amount_count": 1
+      },
+      {
+        "amount_total": "15.75",
+        "amount_total_is_complete": true,
+        "closest_gap_minutes": 240,
+        "currency": "USD",
+        "direction": "downstream",
+        "invalid_amount_count": 0,
+        "known_amount_total": "15.75",
+        "missing_amount_count": 0,
+        "payment_formats": [
+          "WIRE"
+        ],
+        "relationship_id": "rel_9db9563cf9a3a346924d45ca2ea22338d4c4b4d8cf1878efe7cacc32562c6295",
+        "source_account_key": "SYNTHETIC_ACCOUNT_B",
+        "target_account_key": "SYNTHETIC_UPSTREAM_1",
+        "transaction_count": 1,
+        "transaction_ids": [
+          "txn_synthetic_d4"
+        ],
+        "transaction_timestamps": [
+          "2022-09-03T16:00:00Z"
+        ],
+        "valid_amount_count": 1,
+        "zero_amount_count": 0
+      }
+    ],
+    "transactions": [
+      {
+        "amount": "60.00",
+        "amount_status": "valid",
+        "closest_gap_minutes": 1440,
+        "currency": "SGD",
+        "edge_roles": [
+          "UPSTREAM"
+        ],
+        "payment_format": "CARD",
+        "source_account_key": "SYNTHETIC_UPSTREAM_1",
+        "source_entity_id": "entity-SYNTHETIC_UPSTREAM_1",
+        "source_entity_name": "Synthetic SYNTHETIC_UPSTREAM_1",
+        "target_account_key": "SYNTHETIC_ACCOUNT_A",
+        "target_entity_id": "entity-SYNTHETIC_ACCOUNT_A",
+        "target_entity_name": "Synthetic SYNTHETIC_ACCOUNT_A",
+        "transaction_id": "txn_synthetic_u2",
+        "transaction_timestamp": "2022-09-02T12:00:00Z"
+      },
+      {
+        "amount": "40.00",
+        "amount_status": "valid",
+        "closest_gap_minutes": 180,
+        "currency": "USD",
+        "edge_roles": [
+          "UPSTREAM"
+        ],
+        "payment_format": "ACH",
+        "source_account_key": "SYNTHETIC_UPSTREAM_1",
+        "source_entity_id": "entity-SYNTHETIC_UPSTREAM_1",
+        "source_entity_name": "Synthetic SYNTHETIC_UPSTREAM_1",
+        "target_account_key": "SYNTHETIC_ACCOUNT_A",
+        "target_entity_id": "entity-SYNTHETIC_ACCOUNT_A",
+        "target_entity_name": "Synthetic SYNTHETIC_ACCOUNT_A",
+        "transaction_id": "txn_synthetic_u1",
+        "transaction_timestamp": "2022-09-03T09:00:00Z"
+      },
+      {
+        "amount": null,
+        "amount_status": "missing",
+        "closest_gap_minutes": 60,
+        "currency": "USD",
+        "edge_roles": [
+          "UPSTREAM"
+        ],
+        "payment_format": "WIRE",
+        "source_account_key": "SYNTHETIC_UPSTREAM_2",
+        "source_entity_id": "entity-SYNTHETIC_UPSTREAM_2",
+        "source_entity_name": "Synthetic SYNTHETIC_UPSTREAM_2",
+        "target_account_key": "SYNTHETIC_ACCOUNT_A",
+        "target_entity_id": "entity-SYNTHETIC_ACCOUNT_A",
+        "target_entity_name": "Synthetic SYNTHETIC_ACCOUNT_A",
+        "transaction_id": "txn_synthetic_u3",
+        "transaction_timestamp": "2022-09-03T11:00:00Z"
+      },
+      {
+        "amount": "100.25",
+        "amount_status": "valid",
+        "closest_gap_minutes": 0,
+        "currency": "USD",
+        "edge_roles": [
+          "ALERT"
+        ],
+        "payment_format": "WIRE",
+        "source_account_key": "SYNTHETIC_ACCOUNT_A",
+        "source_entity_id": "entity-SYNTHETIC_ACCOUNT_A",
+        "source_entity_name": "Synthetic SYNTHETIC_ACCOUNT_A",
+        "target_account_key": "SYNTHETIC_ACCOUNT_B",
+        "target_entity_id": "entity-SYNTHETIC_ACCOUNT_B",
+        "target_entity_name": "Synthetic SYNTHETIC_ACCOUNT_B",
+        "transaction_id": "txn_synthetic_alert",
+        "transaction_timestamp": "2022-09-03T12:00:00Z"
+      },
+      {
+        "amount": "25.50",
+        "amount_status": "valid",
+        "closest_gap_minutes": 60,
+        "currency": "EUR",
+        "edge_roles": [
+          "DOWNSTREAM"
+        ],
+        "payment_format": "ACH",
+        "source_account_key": "SYNTHETIC_ACCOUNT_B",
+        "source_entity_id": "entity-SYNTHETIC_ACCOUNT_B",
+        "source_entity_name": "Synthetic SYNTHETIC_ACCOUNT_B",
+        "target_account_key": "SYNTHETIC_DOWNSTREAM_1",
+        "target_entity_id": "entity-SYNTHETIC_DOWNSTREAM_1",
+        "target_entity_name": "Synthetic SYNTHETIC_DOWNSTREAM_1",
+        "transaction_id": "txn_synthetic_d1",
+        "transaction_timestamp": "2022-09-03T13:00:00Z"
+      },
+      {
+        "amount": null,
+        "amount_status": "invalid",
+        "closest_gap_minutes": 120,
+        "currency": "EUR",
+        "edge_roles": [
+          "DOWNSTREAM"
+        ],
+        "payment_format": "ACH",
+        "source_account_key": "SYNTHETIC_ACCOUNT_B",
+        "source_entity_id": "entity-SYNTHETIC_ACCOUNT_B",
+        "source_entity_name": "Synthetic SYNTHETIC_ACCOUNT_B",
+        "target_account_key": "SYNTHETIC_DOWNSTREAM_1",
+        "target_entity_id": "entity-SYNTHETIC_DOWNSTREAM_1",
+        "target_entity_name": "Synthetic SYNTHETIC_DOWNSTREAM_1",
+        "transaction_id": "txn_synthetic_d2",
+        "transaction_timestamp": "2022-09-03T14:00:00Z"
+      },
+      {
+        "amount": "0",
+        "amount_status": "valid",
+        "closest_gap_minutes": 180,
+        "currency": "USD",
+        "edge_roles": [
+          "DOWNSTREAM"
+        ],
+        "payment_format": "CARD",
+        "source_account_key": "SYNTHETIC_ACCOUNT_B",
+        "source_entity_id": "entity-SYNTHETIC_ACCOUNT_B",
+        "source_entity_name": "Synthetic SYNTHETIC_ACCOUNT_B",
+        "target_account_key": "SYNTHETIC_DOWNSTREAM_2",
+        "target_entity_id": "entity-SYNTHETIC_DOWNSTREAM_2",
+        "target_entity_name": "Synthetic SYNTHETIC_DOWNSTREAM_2",
+        "transaction_id": "txn_synthetic_d3",
+        "transaction_timestamp": "2022-09-03T15:00:00Z"
+      },
+      {
+        "amount": "15.75",
+        "amount_status": "valid",
+        "closest_gap_minutes": 240,
+        "currency": "USD",
+        "edge_roles": [
+          "DOWNSTREAM"
+        ],
+        "payment_format": "WIRE",
+        "source_account_key": "SYNTHETIC_ACCOUNT_B",
+        "source_entity_id": "entity-SYNTHETIC_ACCOUNT_B",
+        "source_entity_name": "Synthetic SYNTHETIC_ACCOUNT_B",
+        "target_account_key": "SYNTHETIC_UPSTREAM_1",
+        "target_entity_id": "entity-SYNTHETIC_UPSTREAM_1",
+        "target_entity_name": "Synthetic SYNTHETIC_UPSTREAM_1",
+        "transaction_id": "txn_synthetic_d4",
+        "transaction_timestamp": "2022-09-03T16:00:00Z"
+      }
+    ],
+    "window_comparison": {
+      "available_windows": [
+        {
+          "additional_accounts_from_previous_window": null,
+          "additional_transactions_from_previous_window": null,
+          "downstream_account_count": 3,
+          "neighbour_transaction_edge_count": 6,
+          "unique_candidate_account_count": 4,
+          "upstream_account_count": 2,
+          "window_hours": 6
+        },
+        {
+          "additional_accounts_from_previous_window": 0,
+          "additional_transactions_from_previous_window": 0,
+          "downstream_account_count": 3,
+          "neighbour_transaction_edge_count": 6,
+          "unique_candidate_account_count": 4,
+          "upstream_account_count": 2,
+          "window_hours": 12
+        },
+        {
+          "additional_accounts_from_previous_window": 0,
+          "additional_transactions_from_previous_window": 1,
+          "downstream_account_count": 3,
+          "neighbour_transaction_edge_count": 7,
+          "unique_candidate_account_count": 4,
+          "upstream_account_count": 2,
+          "window_hours": 24
+        },
+        {
+          "additional_accounts_from_previous_window": 0,
+          "additional_transactions_from_previous_window": 0,
+          "downstream_account_count": 3,
+          "neighbour_transaction_edge_count": 7,
+          "unique_candidate_account_count": 4,
+          "upstream_account_count": 2,
+          "window_hours": 30
+        },
+        {
+          "additional_accounts_from_previous_window": 0,
+          "additional_transactions_from_previous_window": 0,
+          "downstream_account_count": 3,
+          "neighbour_transaction_edge_count": 7,
+          "unique_candidate_account_count": 4,
+          "upstream_account_count": 2,
+          "window_hours": 48
+        }
+      ],
+      "neighbour_count_semantics": "raw upstream/downstream edge rows, matching dashboard sensitivity",
+      "queried_horizon_hours": 48,
+      "recommendation_policy_status": "not_implemented_pending_validated_policy",
+      "recommended_window": null,
+      "requires_wider_query": true,
+      "unavailable_windows_hours": [
+        72
+      ]
+    }
+  },
+  "data_quality": {
+    "bq1_metadata_available": true,
+    "bq1_status": "available",
+    "candidate_ranking_limitation": "provisional_investigation_order_not_a_validated_risk_score",
+    "individual_source_evidence_complete": true,
+    "invalid_amount_count": 1,
+    "missing_amount_count": 1,
+    "model_explanations_available": false,
+    "unavailable_window_hours": [
+      72
+    ],
+    "valid_amount_without_currency_count": 0,
+    "window_comparison_incomplete": true,
+    "zero_amount_count": 1
+  },
+  "provenance": {
+    "bq1_gold_source_table": "is459_aml_gold.bq1_risk_scores_medium_v1",
+    "bq1_model_version": "synthetic-v1",
+    "bq2_gold_source_table": "is459_aml_gold.bq2_graph_edges_medium_v1",
+    "candidate_ranking_policy_version": "support_count_gap_account_v1",
+    "case_context_schema_version": "1.0",
+    "queried_window_hours": 48
+  },
+  "schema_version": "1.0"
+}
