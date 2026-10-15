@@ -1,5 +1,4 @@
 import re
-import time
 
 import pandas as pd
 import streamlit as st
@@ -8,6 +7,13 @@ from pyvis.network import Network
 
 from src.aws.athena import create_athena_client, execute_query
 from src.bq2.queries import build_alert_lookup_query, build_case_edges_query
+from src.bq2.transforms import (
+    build_display_edges,
+    build_nodes,
+    build_window_sensitivity,
+    calculate_case_metrics,
+    normalize_transaction_timestamp,
+)
 
 # ============================================================
 # CONFIG
@@ -37,16 +43,6 @@ DEFAULT_ALERT_TIMESTAMP = "2022-09-03 12:27:00"
 
 BQ1_HANDOFF_MODE = "BQ1 alert handoff"
 TRANSACTION_LOOKUP_MODE = "Transaction ID lookup"
-
-SENSITIVITY_WINDOWS_HOURS = (
-    6,
-    12,
-    24,
-    30,
-    48,
-    72
-)
-
 
 # ============================================================
 # PAGE CONFIG
@@ -98,22 +94,6 @@ def valid_transaction_id(transaction_id):
     )
 
 
-def normalize_transaction_timestamp(timestamp):
-
-    try:
-        parsed = time.strptime(
-            timestamp.strip(),
-            "%Y-%m-%d %H:%M:%S"
-        )
-    except ValueError:
-        return None
-
-    return time.strftime(
-        "%Y-%m-%d %H:%M:%S",
-        parsed
-    )
-
-
 # ============================================================
 # GET ALERT TRANSACTION
 # ============================================================
@@ -158,276 +138,6 @@ def get_case_edges(
     )
 
     return run_athena_query(query)
-
-
-# ============================================================
-# DISPLAY EDGE AGGREGATION
-# ============================================================
-
-def build_display_edges(
-    raw_edges: pd.DataFrame
-):
-
-    if raw_edges.empty:
-        return pd.DataFrame()
-
-    df = raw_edges.copy()
-
-    df["amount_paid"] = pd.to_numeric(
-        df["amount_paid"],
-        errors="coerce"
-    )
-
-    df["gap_minutes"] = pd.to_numeric(
-        df["gap_minutes"],
-        errors="coerce"
-    )
-
-    # --------------------------------------------------------
-    # Currency stays in grouping key.
-    # Never combine different currencies.
-    # --------------------------------------------------------
-
-    grouped = (
-        df.groupby(
-            [
-                "edge_role",
-
-                "source_account_key",
-                "target_account_key",
-
-                "source_entity_id",
-                "source_entity_name",
-
-                "target_entity_id",
-                "target_entity_name",
-
-                "payment_currency"
-            ],
-            dropna=False
-        )
-        .agg(
-            transaction_count=(
-                "transaction_id",
-                "count"
-            ),
-
-            total_amount=(
-                "amount_paid",
-                "sum"
-            ),
-
-            closest_gap_minutes=(
-                "gap_minutes",
-                "min"
-            ),
-
-            payment_formats=(
-                "payment_format",
-                lambda x:
-                ", ".join(
-                    sorted(
-                        {
-                            str(v)
-                            for v in x
-                            if pd.notna(v)
-                        }
-                    )
-                )
-            )
-        )
-        .reset_index()
-    )
-
-    role_order = {
-        "UPSTREAM": 1,
-        "ALERT": 2,
-        "DOWNSTREAM": 3
-    }
-
-    grouped["role_order"] = (
-        grouped["edge_role"]
-        .map(role_order)
-    )
-
-    grouped = (
-        grouped
-        .sort_values(
-            [
-                "role_order",
-                "closest_gap_minutes"
-            ]
-        )
-        .drop(
-            columns=["role_order"]
-        )
-    )
-
-    return grouped
-
-
-# ============================================================
-# INVESTIGATION WINDOW SENSITIVITY
-# ============================================================
-
-def build_window_sensitivity(
-    raw_edges,
-    alert_sender,
-    alert_receiver,
-    queried_window_hours
-):
-
-    edges = raw_edges.copy()
-    edges["gap_minutes"] = pd.to_numeric(
-        edges["gap_minutes"],
-        errors="coerce"
-    )
-
-    alert_accounts = {
-        alert_sender,
-        alert_receiver
-    }
-    rows = []
-
-    for window_hours in SENSITIVITY_WINDOWS_HOURS:
-
-        if window_hours > queried_window_hours:
-            continue
-
-        window_edges = edges[
-            edges["gap_minutes"]
-            <= window_hours * 60
-        ]
-
-        connected_edges = window_edges[
-            window_edges["edge_role"].isin(
-                ["UPSTREAM", "DOWNSTREAM"]
-            )
-        ]
-
-        upstream_accounts = set(
-            connected_edges.loc[
-                connected_edges["edge_role"]
-                == "UPSTREAM",
-                "source_account_key"
-            ].dropna()
-        ) - alert_accounts
-
-        downstream_accounts = set(
-            connected_edges.loc[
-                connected_edges["edge_role"]
-                == "DOWNSTREAM",
-                "target_account_key"
-            ].dropna()
-        ) - alert_accounts
-
-        connected_accounts = (
-            upstream_accounts
-            | downstream_accounts
-        )
-
-        rows.append({
-            "Window (hours)": window_hours,
-            "Upstream accounts": len(
-                upstream_accounts
-            ),
-            "Downstream accounts": len(
-                downstream_accounts
-            ),
-            "Connected accounts": len(
-                connected_accounts
-            ),
-            # The ALERT transaction is not a connected transaction edge.
-            "Connected transaction edges": len(
-                connected_edges
-            )
-        })
-
-    return pd.DataFrame(rows)
-
-
-# ============================================================
-# BUILD NODE DATA
-# ============================================================
-
-def build_nodes(
-    display_edges,
-    alert_sender,
-    alert_receiver
-):
-
-    node_data = {}
-
-    for _, edge in display_edges.iterrows():
-
-        source = edge[
-            "source_account_key"
-        ]
-
-        target = edge[
-            "target_account_key"
-        ]
-
-        if source not in node_data:
-
-            node_data[source] = {
-                "account_key": source,
-                "entity_id":
-                    edge["source_entity_id"],
-                "entity_name":
-                    edge["source_entity_name"],
-                "roles": set()
-            }
-
-        if target not in node_data:
-
-            node_data[target] = {
-                "account_key": target,
-                "entity_id":
-                    edge["target_entity_id"],
-                "entity_name":
-                    edge["target_entity_name"],
-                "roles": set()
-            }
-
-        role = edge["edge_role"]
-
-        if role == "UPSTREAM":
-            node_data[source][
-                "roles"
-            ].add(
-                "UPSTREAM"
-            )
-
-        elif role == "DOWNSTREAM":
-            node_data[target][
-                "roles"
-            ].add(
-                "DOWNSTREAM"
-            )
-
-
-    # Alert roles take precedence visually
-    node_data[
-        alert_sender
-    ][
-        "roles"
-    ].add(
-        "ALERT_SENDER"
-    )
-
-    node_data[
-        alert_receiver
-    ][
-        "roles"
-    ].add(
-        "ALERT_RECEIVER"
-    )
-
-
-    return list(
-        node_data.values()
-    )
 
 
 # ============================================================
@@ -1046,43 +756,11 @@ st.subheader(
     "Case summary"
 )
 
-connected_accounts = set()
-
-upstream_accounts = set()
-
-downstream_accounts = set()
-
-
-for node in nodes:
-
-    account = node[
-        "account_key"
-    ]
-
-    roles = node[
-        "roles"
-    ]
-
-    if account not in [
-        alert_sender,
-        alert_receiver
-    ]:
-
-        connected_accounts.add(
-            account
-        )
-
-    if "UPSTREAM" in roles:
-
-        upstream_accounts.add(
-            account
-        )
-
-    if "DOWNSTREAM" in roles:
-
-        downstream_accounts.add(
-            account
-        )
+case_metrics = calculate_case_metrics(
+    nodes,
+    alert_sender,
+    alert_receiver
+)
 
 
 col1, col2, col3, col4 = (
@@ -1093,27 +771,21 @@ with col1:
 
     st.metric(
         "Connected accounts",
-        len(
-            connected_accounts
-        )
+        case_metrics["connected_accounts"]
     )
 
 with col2:
 
     st.metric(
         "Upstream accounts",
-        len(
-            upstream_accounts
-        )
+        case_metrics["upstream_accounts"]
     )
 
 with col3:
 
     st.metric(
         "Downstream accounts",
-        len(
-            downstream_accounts
-        )
+        case_metrics["downstream_accounts"]
     )
 
 with col4:
