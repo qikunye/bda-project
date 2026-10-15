@@ -108,6 +108,101 @@ def build_case_context(
 validates identity, counts, amounts, references, ranking policy, and time
 horizon. It neither queries Athena nor mutates its inputs.
 
+## Using CaseContext with Real AWS Data
+
+`load_case_context()` is the orchestration boundary for already-retrieved or
+Athena-retrieved data:
+
+```python
+def load_case_context(
+    *,
+    handoff: AlertHandoff,
+    query_executor: QueryExecutor | None = None,
+    raw_edges: pd.DataFrame | None = None,
+    bq1_result: BQ1MetadataResult | None = None,
+    bq1_row: Mapping[str, Any] | pd.Series | None = None,
+    fetch_bq1: bool = False,
+    queried_window_hours: int = 48,
+    bq1_table: str = BQ1_SCORE_TABLE,
+    bq2_table: str = BQ2_EDGE_TABLE,
+) -> dict[str, Any]: ...
+```
+
+The caller creates and reuses the existing Athena client. Credentials come
+from boto3's normal credential provider chain and are not embedded in code:
+
+```python
+from functools import partial
+
+from src.aws.athena import create_athena_client, execute_query
+from src.config import (
+    ATHENA_DATABASE,
+    AWS_REGION,
+    BQ2_ATHENA_OUTPUT,
+)
+from src.context.projection import build_llm_input
+from src.context.service import load_case_context
+from src.context.validation import serialize_case_context
+
+athena_client = create_athena_client(AWS_REGION)
+query_executor = partial(
+    execute_query,
+    athena_client,
+    database=ATHENA_DATABASE,
+    output_location=BQ2_ATHENA_OUTPUT,
+)
+
+context = load_case_context(
+    handoff=handoff,
+    query_executor=query_executor,
+    queried_window_hours=48,
+    fetch_bq1=True,
+)
+payload = build_llm_input(
+    context,
+    max_candidates=20,
+    max_transactions=100,
+)
+json_payload = serialize_case_context(payload)
+```
+
+The service builds the existing alert-anchored BQ2 query, explicitly converts
+hours to minutes, and preserves its `txn_date` predicates. It never performs a
+separate transaction-ID alert lookup. BQ1 lookup is partition-pruned to the
+selected alert's UTC date and occurs only when `fetch_bq1=True`.
+
+When the dashboard already has BQ2 edges, pass them directly to avoid another
+Athena query:
+
+```python
+context = load_case_context(
+    handoff=handoff,
+    raw_edges=existing_raw_edges,
+    bq1_result=existing_bq1_result,
+    queried_window_hours=48,
+)
+```
+
+The BQ1 inputs are mutually exclusive. Precedence is enforced by rejecting
+contradictory combinations: use one existing `bq1_result`, one `bq1_row`, or
+`fetch_bq1=True`. With none of these, BQ1 is explicitly `unavailable` and no
+BQ1 query is issued. A successful empty lookup remains `not_found`.
+
+Expected application-level query counts are:
+
+| Inputs | BQ2 queries | BQ1 queries |
+|---|---:|---:|
+| Existing BQ2 frame and BQ1 result | 0 | 0 |
+| Existing BQ2 frame and `fetch_bq1=True` | 0 | 1 |
+| Handoff only | 1 | 0 |
+| Handoff and `fetch_bq1=True` | 1 | 1 |
+
+Callers should handle `CaseContextServiceError`, `AthenaQueryError`,
+`BQ1MetadataQueryError`, `BQ1MetadataIntegrityError`, `EvidenceSchemaError`,
+`EvidenceIntegrityError`, `CaseContextIntegrityError`, and
+`CaseContextSerializationError`. Query and integrity failures propagate; they
+are never converted into missing-data statuses.
+
 ## BQ1 availability and interpretation
 
 `bq1.status` is exactly one of:
@@ -235,6 +330,9 @@ answers that an investigator would not possess at inference time.
 
 - `BQ1MetadataIntegrityError` when available BQ1 metadata conflicts with the
   handoff;
+- `BQ1MetadataQueryError` when the optional BQ1 lookup fails;
+- `AthenaQueryError` when direct BQ2 retrieval fails or is cancelled;
+- `CaseContextServiceError` for missing or contradictory service inputs;
 - `EvidenceSchemaError` or `EvidenceIntegrityError` for malformed BQ2 rows;
 - `CaseContextIntegrityError` for cross-section inconsistency;
 - `CaseContextSerializationError` for non-JSON-safe values; and
