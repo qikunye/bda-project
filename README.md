@@ -64,4 +64,17 @@ the normal AWS credential provider chain, and run:
 streamlit run app.py
 ```
 
-No AWS credentials should be stored in this repository.
+## AWS authentication
+
+This project uses AWS CLI login-based credentials through boto3's standard
+credential provider chain. Install the complete project requirements before
+accessing AWS; the pinned Botocore CRT extra supplies the AWS CRT support that
+the login credential provider requires.
+
+An existing AWS CLI login session may expire and need to be refreshed
+separately. A missing or expired login session is an authentication problem.
+It is distinct from an IAM, Lake Formation, Glue, Athena, or S3 permission
+denial received after authentication succeeds.
+
+Never hard-code AWS credentials or store credentials, tokens, or authentication
+cache contents in this repository.
