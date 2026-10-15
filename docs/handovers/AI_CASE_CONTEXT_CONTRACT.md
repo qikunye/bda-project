@@ -203,6 +203,87 @@ Callers should handle `CaseContextServiceError`, `AthenaQueryError`,
 `CaseContextSerializationError`. Query and integrity failures propagate; they
 are never converted into missing-data statuses.
 
+## Real-AWS smoke-test CLI
+
+`scripts/smoke_test_case_context_aws.py` is an operator verification utility.
+It does not replace `load_case_context()` in the production application.
+
+The four alert identity fields are mandatory. Run the default dry-run mode
+first with a previously verified handoff:
+
+```bash
+.venv/bin/python scripts/smoke_test_case_context_aws.py \
+  --transaction-id "<verified-transaction-id>" \
+  --source-account-key "<verified-source-account-key>" \
+  --target-account-key "<verified-target-account-key>" \
+  --timestamp "YYYY-MM-DD HH:MM:00" \
+  --window-hours 48 \
+  --with-bq1 \
+  --max-candidates 20 \
+  --max-transactions 100
+```
+
+Dry run constructs and inspects the existing BQ2 and optional BQ1 SQL. It
+checks partition pruning and reports the planned query count, but does not
+create an AWS client or call an AWS API.
+
+After verifying the plan and alert identity, real execution requires the
+additional `--execute` flag:
+
+```bash
+.venv/bin/python scripts/smoke_test_case_context_aws.py \
+  --transaction-id "<verified-transaction-id>" \
+  --source-account-key "<verified-source-account-key>" \
+  --target-account-key "<verified-target-account-key>" \
+  --timestamp "YYYY-MM-DD HH:MM:00" \
+  --window-hours 48 \
+  --with-bq1 \
+  --max-candidates 20 \
+  --max-transactions 100 \
+  --execute
+```
+
+The real run uses the standard boto3 credential provider chain. Do not add
+credentials to the command or repository. At a high level, the active identity
+needs permission to start and inspect Athena queries, read the relevant Glue
+Catalog metadata and Gold-table data (including applicable Lake Formation or
+S3 permissions), and write/read the configured Athena-results S3 location.
+
+The expected application-level query count is one BQ2 query and zero or one
+BQ1 query. There is no separate unpartitioned alert lookup, Silver query, or
+automatic wider-window query.
+
+Successful execution writes locally ignored files:
+
+```text
+artifacts/aws-smoke/case_context.real.json
+artifacts/aws-smoke/llm_input.real.json
+```
+
+`case_context.real.json` contains the complete fetched and validated evidence.
+`llm_input.real.json` contains the bounded, reference-safe projection. The LLM
+teammate should consume the latter as structured evidence, check
+`data_quality` and `evidence_truncation`, and must not commit or upload either
+file unnecessarily.
+
+Athena queries can incur charges. The current shared executor returns only the
+result DataFrame and does not expose query execution IDs, bytes scanned, or
+duration. Therefore the CLI reports telemetry and cost estimates as
+unavailable; it does not invent measurements or claim a retroactive scan
+limit. Review Athena's own query history for verified execution statistics.
+
+Common failures:
+
+- credential errors: configure the normal AWS profile, environment, or role
+  provider before retrying;
+- table or catalog errors: verify Athena/Glue/Lake Formation access to both
+  configured Gold tables;
+- output errors: verify access to the configured Athena-results S3 prefix;
+- missing anchor or identity mismatch: re-check all four handoff values,
+  especially the UTC minute-resolution timestamp; and
+- BQ1 lookup failure: resolve the query or permissions error rather than
+  treating it as `not_found` or `unavailable`.
+
 ## BQ1 availability and interpretation
 
 `bq1.status` is exactly one of:

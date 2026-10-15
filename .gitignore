@@ -13,4 +13,6 @@ venv/
 data/tmp/
 data/cache/
 
+artifacts/aws-smoke/
+
 *.log
