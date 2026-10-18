@@ -9,8 +9,11 @@ The repository currently contains:
 
 - the live BQ2 Streamlit and Athena investigation application;
 - BQ2 evaluation tooling and evaluation results;
-- BQ1 serving SQL and its documented handoff contract; and
-- scaffolding for a future AI Investigation Copilot.
+- BQ1 serving SQL and its documented handoff contract;
+- the validated CaseContext data layer that feeds the AI Copilot; and
+- the AI Investigation Copilot backend: grounded case summaries generated with
+  Amazon Nova 2 Lite on Amazon Bedrock and checked against the case evidence.
+  Its Streamlit panel is not built yet.
 
 BQ1 model training and feature engineering are maintained externally. The
 shared Silver ETL pipeline is also maintained externally. This repository
@@ -34,9 +37,9 @@ BQ1 Gold + BQ2 Gold
         ↓
       Athena
         ↓
-    Streamlit
-        ↓
- future AI Copilot
+ Streamlit  ──►  CaseContext (src/context)
+                       ↓
+                 AI Copilot (src/ai) ──► Amazon Bedrock (Nova 2 Lite)
 ```
 
 The BQ1-to-BQ2 handoff supplies the transaction ID, source account key,
@@ -63,6 +66,25 @@ the normal AWS credential provider chain, and run:
 ```bash
 streamlit run app.py
 ```
+
+## AI Copilot
+
+The Copilot turns one alert's CaseContext into a short summary. The LLM's
+answer is checked in Python before it can be shown. Account patterns and the
+connected-account review table are computed in Python, not by the model. See
+[docs/handovers/AI_COPILOT_HANDOFF.md](docs/handovers/AI_COPILOT_HANDOFF.md)
+for the interface, checks, evaluation results and open issues.
+
+```bash
+# One summary of the checked-in synthetic example (a billed Bedrock call).
+.venv/bin/python scripts/demo_ai_summary.py
+
+# Unit tests, with no AWS access or paid calls.
+.venv/bin/python -m pytest tests -q
+```
+
+The model is set by `BEDROCK_MODEL_ID` in `src/config.py`. Anthropic models are
+not available on this account's Bedrock; Amazon Nova is.
 
 ## AWS authentication
 

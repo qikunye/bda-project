@@ -14,6 +14,23 @@ Scope: grounded LLM summaries, case-aware chat, explainable prioritisation and i
 
 AI is inserted after analytical/query outputs and before final analyst interaction.
 
+> **Implementation status (18 October 2026).** This document is the original proposal and is kept unchanged below. What was built, and where it differs from the proposal, is in [AI_COPILOT_HANDOFF.md](AI_COPILOT_HANDOFF.md).
+>
+> | Phase | Status |
+> | --- | --- |
+> | 0: Contract | Done. The CaseContext schema is implemented by the data layer in `src/context/` (not in a separate `ai/context_builder.py`); the response contract is in `src/ai/schemas.py` |
+> | 1: Summary | Done (backend). Prompt `summary-v4` on Amazon Nova 2 Lite, with deterministic grounding, scope and style checks |
+> | 2: Chat | Not started |
+> | 3: BQ1 explainability | Blocked. The reasons file exists, but it is not yet integrated into CaseContext |
+> | 4: Candidate ranking | Uses CaseContext's provisional rule; the team still has to agree on one rule. Account patterns are written by Python, and the LLM only names the first candidate |
+> | 5: Window guidance | Not started |
+> | 6: Final evaluation | Started: 7 synthetic and 10 real cases, with automated quality checks |
+>
+> **Main differences from the proposal:**
+> - **Provider:** Amazon Bedrock with Amazon Nova 2 Lite, because Anthropic models are not available on the account.
+> - **Account patterns:** both-sided and repeated-transfer accounts are written by Python, not explained by the LLM, after testing showed the LLM misattributing counts.
+> - **Package location:** the package is `src/ai/`.
+
 ---
 
 ## 1. Executive Summary
