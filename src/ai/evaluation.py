@@ -14,6 +14,7 @@ from typing import Any
 from src.ai.grounding import numbers_in_text
 from src.ai.schemas import CopilotResponse
 
+SUMMARY_CANDIDATE_LIMIT = 3
 _SNAKE_CASE_TOKEN = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
 _GUILT_LANGUAGE = re.compile(
     r"\b(guilty|criminal|laundered|is laundering|are laundering|"
@@ -109,11 +110,12 @@ def evaluate_summary(
             answer,
             [candidate["account_key"] for candidate in candidates[:1]],
         ),
+        # Later candidates are listed in the deterministic review table.
         "mentions_two_way_candidates": _mentions_all(
             answer,
             [
                 candidate["account_key"]
-                for candidate in candidates
+                for candidate in candidates[:SUMMARY_CANDIDATE_LIMIT]
                 if candidate["relationship_direction"] == "both"
             ],
         ),
@@ -121,7 +123,7 @@ def evaluate_summary(
             answer,
             [
                 candidate["account_key"]
-                for candidate in candidates
+                for candidate in candidates[:SUMMARY_CANDIDATE_LIMIT]
                 if candidate["repeated_transfer_indicator"]
             ],
         ),

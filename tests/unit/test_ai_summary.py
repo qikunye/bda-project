@@ -1,4 +1,5 @@
 from copy import deepcopy
+from decimal import Decimal
 
 import pytest
 from botocore.exceptions import ClientError
@@ -9,7 +10,12 @@ from src.ai.llm_client import (
     LLMUsage,
     StructuredCompletion,
 )
-from src.ai.prompts import ANSWER_TOOL, DEFAULT_SUMMARY_PROMPT, SUMMARY_PROMPTS
+from src.ai.prompts import (
+    ANSWER_TOOL,
+    DEFAULT_SUMMARY_PROMPT,
+    SUMMARY_PROMPTS,
+    SummaryPrompt,
+)
 from src.ai.summary import generate_case_summary
 from src.context.projection import build_llm_input
 from src.context.validation import CaseContextIntegrityError
@@ -64,7 +70,8 @@ def test_grounded_first_answer_is_returned_without_retry(llm_input):
     assert len(client.calls) == 1
     assert result.usage == LLMUsage(input_tokens=1000, output_tokens=100)
     assert result.model_id == "scripted-model"
-    assert result.prompt_version == "summary-v2"
+    assert result.prompt_version == "summary-v4"
+    assert result.style_issues == ()
     assert len(result.context_sha256) == 64
 
 
@@ -99,6 +106,95 @@ def test_earlier_prompt_version_can_be_selected(llm_input):
     assert client.calls[0]["system"] == SUMMARY_PROMPTS["summary-v1"].system
 
 
+def test_only_the_prompts_own_instruction_numbers_are_accepted(llm_input):
+    payload = {
+        **deepcopy(GROUNDED_PAYLOAD),
+        "answer": f"Alert {ALERT_ID} was reviewed among the first 17 candidates.",
+    }
+    default = SUMMARY_PROMPTS["summary-v3"]
+    with_limit = SummaryPrompt(
+        "test-limit",
+        default.system,
+        default.task,
+        instruction_numbers=frozenset({Decimal(17)}),
+    )
+
+    accepted = generate_case_summary(
+        llm_input, ScriptedClient(payload), prompt=with_limit, max_attempts=1
+    )
+    rejected = generate_case_summary(
+        llm_input, ScriptedClient(payload), prompt=default, max_attempts=1
+    )
+
+    assert accepted.status == "grounded"
+    assert rejected.status == "rejected"
+
+
+def v4_payload(answer):
+    return {
+        **deepcopy(GROUNDED_PAYLOAD),
+        "answer": answer,
+        "evidence": [
+            {"type": "transaction", "id": ALERT_ID},
+            {"type": "account", "id": "SYNTHETIC_UPSTREAM_1"},
+            {"type": "account", "id": "SYNTHETIC_DOWNSTREAM_1"},
+        ],
+    }
+
+
+def test_v4_answer_naming_only_the_first_candidate_is_shown(llm_input):
+    payload = v4_payload(
+        f"Alert {ALERT_ID} was a WIRE payment of USD 100.25. "
+        "SYNTHETIC_UPSTREAM_1 is first in review order with 3 supporting transfers."
+    )
+
+    result = generate_case_summary(llm_input, ScriptedClient(payload), max_attempts=1)
+
+    assert result.status == "grounded"
+    assert result.pattern_summary.startswith("Accounts on both sides")
+
+
+@pytest.mark.parametrize(
+    ("answer", "code"),
+    [
+        (
+            f"Alert {ALERT_ID} is linked to SYNTHETIC_DOWNSTREAM_1.",
+            "out_of_scope_account",
+        ),
+        (
+            f"Alert {ALERT_ID}: SYNTHETIC_UPSTREAM_1 appears on both sides.",
+            "out_of_scope_pattern_claim",
+        ),
+        (
+            f"Alert {ALERT_ID}: no other candidates show these patterns.",
+            "out_of_scope_pattern_claim",
+        ),
+    ],
+)
+def test_v4_blocks_answers_that_describe_account_patterns(llm_input, answer, code):
+    result = generate_case_summary(
+        llm_input, ScriptedClient(v4_payload(answer)), max_attempts=1
+    )
+
+    assert result.status == "rejected"
+    assert code in [issue.code for issue in result.attempts[0].issues]
+    # The data-derived patterns are still available to show.
+    assert result.pattern_summary is not None
+
+
+def test_earlier_prompts_may_still_describe_patterns(llm_input):
+    payload = v4_payload(f"Alert {ALERT_ID}: SYNTHETIC_UPSTREAM_1 appears on both sides.")
+
+    result = generate_case_summary(
+        llm_input,
+        ScriptedClient(payload),
+        prompt=SUMMARY_PROMPTS["summary-v3"],
+        max_attempts=1,
+    )
+
+    assert result.status == "grounded"
+
+
 def test_rejected_answer_is_retried_with_its_problems(llm_input):
     client = ScriptedClient(INVENTED_NUMBER_PAYLOAD, GROUNDED_PAYLOAD)
 
@@ -113,6 +209,36 @@ def test_rejected_answer_is_retried_with_its_problems(llm_input):
     assert "Your previous answer was rejected" in retry_message
     assert "999.99" in retry_message
     assert result.usage == LLMUsage(input_tokens=2000, output_tokens=200)
+
+
+WORDY_PAYLOAD = {
+    **deepcopy(GROUNDED_PAYLOAD),
+    "answer": f"Alert {ALERT_ID} was a WIRE payment of USD 100.25 with two upstream accounts.",
+}
+
+
+def test_style_problem_is_retried_and_the_clean_answer_is_shown(llm_input):
+    client = ScriptedClient(WORDY_PAYLOAD, GROUNDED_PAYLOAD)
+
+    result = generate_case_summary(llm_input, client)
+
+    assert result.status == "grounded"
+    assert result.response.answer == GROUNDED_PAYLOAD["answer"]
+    assert result.style_issues == ()
+    assert [issue.code for issue in result.attempts[0].style_issues] == [
+        "numbers_as_digits"
+    ]
+    assert "write every number as digits" in client.calls[1]["user_message"]
+
+
+def test_style_problem_never_blocks_a_grounded_answer(llm_input):
+    client = ScriptedClient(WORDY_PAYLOAD, INVENTED_NUMBER_PAYLOAD)
+
+    result = generate_case_summary(llm_input, client)
+
+    assert result.status == "grounded"
+    assert result.response.answer == WORDY_PAYLOAD["answer"]
+    assert [issue.code for issue in result.style_issues] == ["numbers_as_digits"]
 
 
 def test_answer_failing_every_attempt_is_not_shown(llm_input):

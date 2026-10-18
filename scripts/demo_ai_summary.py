@@ -58,6 +58,8 @@ def main() -> int:
         print("Limitations:")
         for limitation in result.response.limitations:
             print(f"  {limitation.code}: {limitation.detail}")
+    if result.pattern_summary:
+        print("\nAccount patterns (from the data, not the model):\n" + result.pattern_summary)
     return 0 if result.status == "grounded" else 1
 
 

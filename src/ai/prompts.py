@@ -3,6 +3,7 @@
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from src.ai.grounding import GroundingIndex, GroundingIssue
@@ -24,6 +25,14 @@ class SummaryPrompt:
     version: str
     system: str
     task: str
+    # Numbers the prompt itself gives the model (such as a naming limit), which
+    # an answer may repeat without them appearing in the case.
+    instruction_numbers: frozenset[Decimal] = frozenset()
+    # Scope limits for prompts whose account patterns are written by Python:
+    # how many leading candidates the answer may name, and whether it may
+    # describe both-sided or repeated-transfer patterns at all.
+    max_named_candidates: int | None = None
+    allows_pattern_claims: bool = True
 
 
 _SYSTEM_V1 = """\
@@ -134,14 +143,81 @@ made repeated transfers, with its number of supporting transfers. If there \
 are none, say so.
 If the case has no connected accounts, say so instead of items 4 and 5."""
 
+_V2_FINAL_RULE = "11. Submit your answer only through the submit_answer tool.\n"
+_SYSTEM_V3 = _SYSTEM_V2.replace(
+    _V2_FINAL_RULE,
+    """\
+11. The analyst sees a full table of every connected account below your \
+summary, so name at most 3 connected accounts. Whenever you give a transfer \
+count, put it in the same sentence directly after the account key it belongs \
+to, for example "account X made 6 supporting transfers". Never list several \
+counts together, and never describe "all candidates".
+12. Submit your answer only through the submit_answer tool.
+""",
+)
+
+_TASK_V3 = """\
+Summarise this case in 4 to 7 sentences, in this order:
+1. The alert: its transaction ID, the sender and receiver account keys, the \
+amount with its currency, the payment format, and the date and time.
+2. BQ1: the alert's risk rank if BQ1 metadata is available; otherwise say \
+that BQ1 metadata is not available.
+3. Case size: how many upstream and downstream connected accounts the queried \
+window contains, naming the window length in hours.
+4. Review order: the first candidate, and that it is first because of its \
+number of supporting transfers and its closest transfer time to the alert.
+5. Patterns: look at the first 3 candidates in review order, but do not \
+mention this limit or how many candidates you looked at. Name each of them \
+that appears on both sides (it paid the sender and also received money from \
+the receiver) or made repeated transfers, each with its own number of \
+supporting transfers. If any later candidate also shows these patterns, add \
+that more are listed in the review table. If none shows them, say so.
+If the case has no connected accounts, say so instead of items 4 and 5."""
+
+_SYSTEM_V4 = _SYSTEM_V2.replace(
+    _V2_FINAL_RULE,
+    """\
+11. Name no connected account except the first candidate in review order, and \
+do not describe which accounts appear on both sides or made repeated \
+transfers. The application adds those facts and a full table of connected \
+accounts below your summary, computed from the data.
+12. Submit your answer only through the submit_answer tool.
+""",
+)
+
+_TASK_V4 = """\
+Summarise this case in 3 to 5 sentences, in this order:
+1. The alert: its transaction ID, the sender and receiver account keys, the \
+amount with its currency, the payment format, and the date and time.
+2. BQ1: the alert's risk rank if BQ1 metadata is available; otherwise say \
+that BQ1 metadata is not available.
+3. Case size: how many upstream and downstream connected accounts the queried \
+window contains, naming the window length in hours.
+4. Review order: the first candidate, and that it is first because of its \
+number of supporting transfers and its closest transfer time to the alert.
+If the case has no connected accounts, say so instead of item 4."""
+
 SUMMARY_PROMPTS = {
     prompt.version: prompt
     for prompt in (
         SummaryPrompt("summary-v1", _SYSTEM_V1, _TASK_V1),
         SummaryPrompt("summary-v2", _SYSTEM_V2, _TASK_V2),
+        SummaryPrompt(
+            "summary-v3",
+            _SYSTEM_V3,
+            _TASK_V3,
+            instruction_numbers=frozenset({Decimal(3)}),
+        ),
+        SummaryPrompt(
+            "summary-v4",
+            _SYSTEM_V4,
+            _TASK_V4,
+            max_named_candidates=1,
+            allows_pattern_claims=False,
+        ),
     )
 }
-DEFAULT_SUMMARY_PROMPT = SUMMARY_PROMPTS["summary-v2"]
+DEFAULT_SUMMARY_PROMPT = SUMMARY_PROMPTS["summary-v4"]
 
 
 def _disclosure_lines(index: GroundingIndex) -> str:

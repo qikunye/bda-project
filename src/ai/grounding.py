@@ -7,8 +7,11 @@ that disclosure codes match the case's data-quality conditions.
 
 Known limit: the number check is set membership. It rejects invented numbers
 (including cross-currency sums), but not a real number attached to the wrong
-fact. Wording rules such as "no guilt claims" are enforced by the prompt and
-measured by evaluation, not here.
+fact. The one attribution it does check is a transfer count stated after a
+connected account in the same sentence, which must be that account's count;
+lists of three or more bare numbers are rejected because they cannot be
+attributed. Wording rules such as "no guilt claims" are enforced by the prompt
+and measured by evaluation, not here.
 """
 
 import re
@@ -45,6 +48,25 @@ _NUMBER_WORD_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_ACCOUNT_MENTION_PATTERN = re.compile(
+    "|".join(
+        pattern.pattern
+        for evidence_type, pattern in _ID_MENTION_PATTERNS
+        if evidence_type == "account"
+    )
+)
+_NUMBER_WORDS_ALTERNATION = (
+    rf"(?:{'|'.join(_TENS_WORDS)})(?:-(?:{'|'.join(_UNIT_WORDS[1:10])}))?"
+    rf"|{'|'.join(_UNIT_WORDS)}"
+)
+_TRANSFER_COUNT_PATTERN = re.compile(
+    rf"\b(\d[\d,]*|{_NUMBER_WORDS_ALTERNATION})\s+"
+    r"(?:supporting\s+)?(?:transfers?|transactions?)\b",
+    re.IGNORECASE,
+)
+_NUMBER_LIST_PATTERN = re.compile(r"\b\d+(?:,\s+(?:and\s+)?\d+){2,}\b")
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+
 
 @dataclass(frozen=True)
 class GroundingIssue:
@@ -69,6 +91,7 @@ class GroundingIndex:
     numbers: frozenset[Decimal]
     true_disclosures: frozenset[str]
     required_disclosures: frozenset[str]
+    candidate_transfer_counts: Mapping[str, frozenset[Decimal]]
 
 
 def _normalize_number(token: str) -> Decimal | None:
@@ -185,7 +208,56 @@ def build_grounding_index(context: dict[str, Any]) -> GroundingIndex:
         required_disclosures=frozenset(
             code for code in _REQUIRED_DISCLOSURES if code in true_disclosures
         ),
+        candidate_transfer_counts={
+            candidate["account_key"]: frozenset(
+                Decimal(candidate[field])
+                for field in (
+                    "supporting_transaction_count",
+                    "upstream_supporting_transaction_count",
+                    "downstream_supporting_transaction_count",
+                )
+            )
+            for candidate in context["bq2"]["candidates"]
+        },
     )
+
+
+def _attribution_issues(
+    answer: str,
+    index: GroundingIndex,
+) -> list[GroundingIssue]:
+    issues = []
+    for match in _NUMBER_LIST_PATTERN.finditer(answer):
+        issues.append(
+            GroundingIssue(
+                "unattributed_number_list",
+                f"Answer lists numbers {match.group()!r} without naming the "
+                "account each belongs to; name each account next to its count.",
+            )
+        )
+    for sentence in _SENTENCE_BOUNDARY.split(answer):
+        accounts = [
+            (mention.end(), mention.group())
+            for mention in _ACCOUNT_MENTION_PATTERN.finditer(sentence)
+        ]
+        for match in _TRANSFER_COUNT_PATTERN.finditer(sentence):
+            preceding = [
+                account for end, account in accounts if end <= match.start()
+            ]
+            if not preceding or preceding[-1] not in index.candidate_transfer_counts:
+                continue
+            account = preceding[-1]
+            (count,) = numbers_in_text(match.group(1), include_words=True)
+            if count not in index.candidate_transfer_counts[account]:
+                issues.append(
+                    GroundingIssue(
+                        "misattributed_count",
+                        f"Answer gives {account!r} {match.group()!r}, but "
+                        "that account's supporting transfer counts are "
+                        f"{sorted(int(value) for value in index.candidate_transfer_counts[account])}.",
+                    )
+                )
+    return issues
 
 
 def check_response(
@@ -239,6 +311,8 @@ def check_response(
                 f"Answer states {number:f}, which does not appear in the case.",
             )
         )
+
+    issues.extend(_attribution_issues(response.answer, index))
 
     if not response.evidence and not response.needs_more_context:
         issues.append(

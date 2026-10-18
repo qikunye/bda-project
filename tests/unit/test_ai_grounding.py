@@ -284,3 +284,69 @@ def test_id_only_transaction_reference_is_valid_evidence():
     )
 
     assert check_response(response, build_grounding_index(truncated)).ok
+
+
+DOWNSTREAM_1 = "SYNTHETIC_DOWNSTREAM_1"
+
+
+def pairing_response(sentence):
+    return make_response(
+        answer=f"Alert {ALERT_ID} has connected accounts. {sentence}",
+        evidence=[
+            {"type": "transaction", "id": ALERT_ID},
+            {"type": "account", "id": TOP_CANDIDATE},
+            {"type": "account", "id": DOWNSTREAM_1},
+            {"type": "account", "id": "SYNTHETIC_ACCOUNT_A"},
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        f"{TOP_CANDIDATE} made 3 supporting transfers.",
+        f"{TOP_CANDIDATE} has 3 supporting transfers and {DOWNSTREAM_1} has 2.",
+        f"{TOP_CANDIDATE} made 3 transfers, and {DOWNSTREAM_1} made 2 transfers.",
+        # A side-specific count (2 upstream transfers) is that account's count too.
+        f"{TOP_CANDIDATE} made 2 transfers into the sender.",
+        # Counts after a non-candidate account are not attributed.
+        "SYNTHETIC_ACCOUNT_A received 4 transfers.",
+        # Counts in a sentence without an account are not attributed.
+        "There were 8 transactions in the case.",
+    ],
+)
+def test_correctly_paired_or_unattributable_counts_pass(index, sentence):
+    assert check_response(pairing_response(sentence), index).ok
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        f"{DOWNSTREAM_1} made 3 supporting transfers.",
+        f"{TOP_CANDIDATE} has 2 supporting transfers and {DOWNSTREAM_1} made 3 transfers.",
+        f"{DOWNSTREAM_1} made three supporting transfers.",
+    ],
+)
+def test_count_attached_to_the_wrong_account_is_rejected(index, sentence):
+    report = check_response(pairing_response(sentence), index)
+
+    assert issue_codes(report) == ["misattributed_count"]
+    assert DOWNSTREAM_1 in report.issues[0].message
+
+
+def test_bare_number_list_is_rejected(index):
+    # The pattern Nova produced on a real 7-account case.
+    sentence = "The downstream candidates made 6, 4, 2, 2, and 1 transfers."
+
+    report = check_response(
+        pairing_response(sentence.replace("6, 4, 2, 2, and 1", "3, 2, 2, and 1")),
+        index,
+    )
+
+    assert issue_codes(report) == ["unattributed_number_list"]
+
+
+def test_dates_and_amounts_are_not_number_lists(index):
+    sentence = "The alert was on September 3, 2022 for USD 1,440."
+
+    assert check_response(pairing_response(sentence), index).ok

@@ -1,13 +1,16 @@
-"""Compare summary prompt versions on synthetic cases with Amazon Bedrock.
+"""Compare summary prompt versions on CaseContexts with Amazon Bedrock.
 
 This makes real, billed Bedrock calls: up to two per case and prompt version.
-Only synthetic cases are used, so the output CSV is safe to commit.
+By default only synthetic cases are used, so the output CSV is safe to commit.
+With --cases-dir, real cases are read from */llm_input.real.json and results
+are written beside them under the Git-ignored artifacts/aws-smoke/.
 """
 
 import argparse
 import csv
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -72,8 +75,16 @@ def synthetic_cases() -> dict[str, dict]:
     }
 
 
+def real_cases(cases_directory: Path) -> dict[str, dict]:
+    return {
+        path.parent.name: json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(cases_directory.glob("*/llm_input.real.json"))
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cases-dir", type=Path)
     parser.add_argument(
         "--prompts",
         nargs="+",
@@ -81,25 +92,43 @@ def main() -> int:
         choices=sorted(SUMMARY_PROMPTS),
     )
     parser.add_argument("--model-id", default=BEDROCK_MODEL_ID)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+
+    if args.cases_dir is None:
+        cases = synthetic_cases()
+        output = args.output or DEFAULT_OUTPUT
+    else:
+        cases = real_cases(args.cases_dir)
+        if not cases:
+            parser.error(f"No */llm_input.real.json files in {args.cases_dir}.")
+        output = args.output or args.cases_dir / "summary_prompt_comparison.real.csv"
 
     client = BedrockConverseClient(
         create_bedrock_runtime_client(AWS_REGION),
         model_id=args.model_id,
     )
     rows = []
-    for case_name, llm_input in synthetic_cases().items():
+    for case_name, llm_input in cases.items():
         for version in args.prompts:
             result = generate_case_summary(
                 llm_input,
                 client,
                 prompt=SUMMARY_PROMPTS[version],
             )
+            # Score what the analyst reads: for prompts that leave account
+            # patterns to the application, that includes the pattern summary.
+            shown = result.response
+            if (
+                shown is not None
+                and not SUMMARY_PROMPTS[version].allows_pattern_claims
+                and result.pattern_summary
+            ):
+                shown = replace(
+                    shown, answer=f"{shown.answer} {result.pattern_summary}"
+                )
             quality = (
-                evaluate_summary(result.response, llm_input)
-                if result.response is not None
-                else None
+                evaluate_summary(shown, llm_input) if shown is not None else None
             )
             rows.append(
                 {
@@ -113,6 +142,9 @@ def main() -> int:
                         + ",".join(issue.code for issue in attempt.issues)
                         for number, attempt in enumerate(result.attempts, 1)
                         if attempt.issues
+                    ),
+                    "style_issues_shown": ",".join(
+                        issue.code for issue in result.style_issues
                     ),
                     "quality_passed": "" if quality is None else quality.passed,
                     "failed_checks": (
@@ -128,6 +160,7 @@ def main() -> int:
                     "answer": (
                         "" if result.response is None else result.response.answer
                     ),
+                    "pattern_summary": result.pattern_summary or "",
                 }
             )
             row = rows[-1]
@@ -137,8 +170,8 @@ def main() -> int:
                 f"failed=[{row['failed_checks']}] issues=[{row['grounding_issues']}]"
             )
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", newline="", encoding="utf-8") as handle:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
@@ -155,7 +188,7 @@ def main() -> int:
             f"{sum(r['input_tokens'] for r in version_rows)}"
             f"/{sum(r['output_tokens'] for r in version_rows)}"
         )
-    print(f"\nWrote {args.output.relative_to(PROJECT_ROOT)}")
+    print(f"\nWrote {output.resolve().relative_to(PROJECT_ROOT)}")
     return 0
 
 
