@@ -14,3 +14,6 @@ BQ1_SCORE_TABLE = "is459_aml_gold.bq1_risk_scores_medium_v1"
 BQ2_EDGE_TABLE = "is459_aml_gold.bq2_graph_edges_medium_v1"
 
 BQ2_ATHENA_OUTPUT = "s3://is459-aml-g1t5/athena-results/bq2/"
+
+# Anthropic models are not available on this account's Bedrock; Amazon Nova is.
+BEDROCK_MODEL_ID = "us.amazon.nova-2-lite-v1:0"
