@@ -1,6 +1,7 @@
 """Reusable AWS Athena query execution and result parsing."""
 
 import time
+from dataclasses import dataclass
 
 import boto3
 import pandas as pd
@@ -19,6 +20,15 @@ def create_athena_client(region_name: str):
     )
 
 
+@dataclass(frozen=True)
+class QueryStats:
+    """Cost and timing of one Athena query execution."""
+
+    query_execution_id: str
+    bytes_scanned: int
+    engine_ms: int
+
+
 def execute_query(
     client,
     *,
@@ -28,6 +38,26 @@ def execute_query(
     poll_interval_seconds: float = 0.5,
 ) -> pd.DataFrame:
     """Execute an Athena query and return its string-valued result frame."""
+
+    frame, _ = execute_query_with_stats(
+        client,
+        query=query,
+        database=database,
+        output_location=output_location,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+    return frame
+
+
+def execute_query_with_stats(
+    client,
+    *,
+    query: str,
+    database: str,
+    output_location: str,
+    poll_interval_seconds: float = 0.5,
+) -> tuple[pd.DataFrame, QueryStats]:
+    """Execute an Athena query and return its result frame and scan statistics."""
 
     response = client.start_query_execution(
         QueryString=query,
@@ -48,6 +78,12 @@ def execute_query(
         state = status["State"]
 
         if state == "SUCCEEDED":
+            statistics = response["QueryExecution"].get("Statistics", {})
+            stats = QueryStats(
+                query_execution_id=query_execution_id,
+                bytes_scanned=int(statistics.get("DataScannedInBytes", 0)),
+                engine_ms=int(statistics.get("EngineExecutionTimeInMillis", 0)),
+            )
             break
 
         if state in {"FAILED", "CANCELLED"}:
@@ -96,7 +132,10 @@ def execute_query(
 
             rows.append(values)
 
-    return pd.DataFrame(
-        rows,
-        columns=columns,
+    return (
+        pd.DataFrame(
+            rows,
+            columns=columns,
+        ),
+        stats,
     )

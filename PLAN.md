@@ -1,0 +1,457 @@
+# IS459 AML — Agent workstream: final plan (context for Claude Code)
+
+Owner: Diloo (agent workstream). Date: 21 Oct 2026.
+Assumption: the teammate has rebuilt the ETL as described in `ETL_Final_Plan.md` (daily lane: raw CSV -> S3 Bronze -> Step Functions; real-time lane: CSV slice -> Kinesis -> Lambda -> SQS). The agent only depends on the Gold v2 outputs, which do not change.
+**Status 21 Oct:** the ETL rebuild has not started yet. This does not block the agent: the Gold v2 tables for 14-16 Sep already exist. Only milestone 8 (EventBridge) waits for the rebuild. See section 16 for progress and section 17 for decisions.
+
+**This file is the working document.** Progress, findings and decisions go in sections 16-17. Where a finding contradicts an earlier section, that section has a `> **Update:**` note. The old handovers in `docs/handovers/` are out of date.
+
+Items marked **[VERIFY]** are things I believe but could not confirm from the docs. Check them in the repo or Athena before coding against them. Items marked **[PROPOSED]** are design choices, not facts. Resolved items are marked **[VERIFIED 21 Oct]**.
+
+---
+
+## 0. Instructions to Claude Code
+
+1. Before writing code, run the checklist in section 14 ("Verify first") and report discrepancies.
+2. Build in the order in section 12. Each milestone has an acceptance test; do not move on until it passes.
+3. Hard rules (section 2) override anything else, including convenience.
+4. Do not touch ETL, Silver, Gold, v1, or the real-time lane. The agent is read-only against Gold and writes only to its own DynamoDB tables and S3 prefix.
+5. Prefer small, testable modules. Every tool is a plain Python function with typed inputs/outputs and unit tests that run without the LLM.
+
+---
+
+## 1. Project snapshot (facts)
+
+- Dataset: IBM AML, LI-Medium. Region us-east-1, account 941377154820, bucket `s3://is459-aml-g1t5/`. AWS budget US$250 (roughly US$230 left).
+- Two fixed business questions:
+  - **BQ1**: alert prioritisation. XGBoost (frozen 3.2.0, iteration range 0-96), 26 causal features (+ `amt_vs_ccy_median` as 27th model input). Chronological split 60/20/20; test days are 14-16 Sep 2022. Recall@0.1% 0.302, @1% 0.634, @10% 0.928; Precision@1% about 3.1%. `risk_score` is a ranking score, not a probability. `risk_rank` is a **global** rank over the dataset (a per-day cut needs `row_number()` over the day).
+  - **BQ2**: time-bounded upstream/downstream case expansion around a flagged transaction. Directed transaction-level edges (self-transfers excluded), configurable 6-72 h window, default 48 h. On 176 random-chain cases, 48 h finds both neighbours 89.2% of the time and at least one 100%; 72 h 98.3% but noisier.
+- Gold tables (Parquet, partitioned by `txn_date`, read via Athena):
+  - `is459_aml_gold.bq1_risk_scores_medium_v2` (scores, ranks, split; **[VERIFY]** it contains a label column, believed `evaluation_is_laundering`)
+  - `is459_aml_gold.bq1_features_medium_v2`
+  - `is459_aml_gold.bq2_graph_edges_medium_v2` (v1 equivalents exist with `_v1`)
+- Reasons: `bq1_explanations_top1pct.csv`, 62,504 rows = top 1% of the **test** queue, keyed by `transaction_id`, 3 reasons per row with direction and size. **[VERIFY]** S3 location and exact column names. Alerts outside the top 1% have **no reasons**; tools must return `reasons: null` and the agent must cope.
+- BQ2 lookup cost: a 48 h upstream+downstream lookup scans 76-126 MB, 1.3-1.7 s. An unpartitioned `transaction_id` lookup scans about 0.9 GB, so always filter by `txn_date`.
+- Data horizon: v2 Gold edges cover up to **16 Sep 2022** (v2 loaded 14-16 Sep; 1-13 Sep point at v1 files). Alerts late on 15-16 Sep have a **truncated downstream window**. Tools must return `window_truncated: true` when the window passes the horizon. **[VERIFY]** the horizon by `SELECT max(...)` on the edge table.
+- Synthetic data warning: the dataset is simulated. A one-off ACH pattern is a known bias; do not claim real-world detection performance.
+- Real-time lane (reference only): Lambda `is459-rt-scorer`, alert threshold 0.3605 (500th-highest v2 score on 15 Sep), alerts land in DynamoDB `is459_rt_alerts` and SQS `is459-rt-alert-events`. Out of scope for the agent (section 13).
+- Demo identifiers: alert `txn_630dea1dda9482dbd765a966355d6708` (sender `120075|81294D7A0`, receiver `15126|8127C1990`, 2022-09-03 12:27:00; in both BQ1 and BQ2 tables). Account key format: `<bank_id with leading zeros stripped>|<account_number>`.
+  > **Update:** this alert is on 3 Sep, so it has **no v2 score**: v2 scores cover only 14-16 Sep. **New demo alert (D9):** `txn_a0f703e20da6f9bf0bdad4c0d62862de`, 2022-09-14 10:57, sender `6066|802DF3A20` → receiver `56081|814E08FE0`, 1,389,714.01 Rupee, per-day rank 2 (global 66), has reasons. Its 48 h graph is complete: 8 upstream edges from 2 accounts, 14 downstream edges to 5 accounts. 16 of the 22 neighbours are scored: 1 is in the day's top 500 (day rank 58) and 15 are outside it (promotion candidates).
+
+---
+
+## 2. Hard rules
+
+1. **Read-only tools.** The agent cannot write anywhere except its own decisions tables/trace prefix.
+2. **No labels.** The label column must never reach the agent or its prompts. Enforce twice: (a) agent queries run only against label-free Athena views (section 5), (b) the SQL builder uses a column allowlist. Labels are used only by the offline evaluation script, under a different IAM role/credentials.
+3. **The agent never removes an alert from the BQ1 queue.** The full ranked queue always exists. The agent only produces an *agent-adjusted review list* (section 7) and annotations.
+4. **All numbers and IDs come from tools.** The LLM chooses tools and verdicts; it does not type numbers or IDs from memory. Every cited ID is checked against tool outputs.
+5. **Currency-safe.** Never sum amounts across currencies; aggregate per currency.
+6. **Bounded.** Max 5 tool steps per run, a token cap, a per-run timeout, and a global spend cap.
+7. **Reasons are model explanations, not proof.** Do not present them as evidence of wrongdoing.
+8. ~~**No Bedrock.** Use an external OpenAI-compatible LLM API (section 9).~~ **Superseded (D1):** use Bedrock with the Converse API, starting with Nova 2 Lite. Only Anthropic models are blocked on this account.
+
+---
+
+## 3. What the agent is for
+
+For each alert, answer: *is this worth an analyst's time, and what else belongs with it?* It does this by combining:
+- **BQ1** (seed): rank, score, top-3 reasons.
+- **BQ2** (evidence): who sent money into / out of the accounts within the window.
+- **BQ1 again on the neighbours**: how risky BQ1 thinks each neighbour is. This is the loop-closing step and the main source of value.
+
+Hypothesis to test (not a claim): BQ1 misses some laundering transactions (recall@1% about 0.63) that sit in chains next to ones it ranks highly; pulling those neighbours into the review list recovers some of them.
+
+---
+
+## 4. Triggers
+
+| Trigger | When | Scope | Output |
+|---|---|---|---|
+| **B** (batch) | After the day's Gold commit | Top N cases of the day (default N=100, configurable) | Decisions + case queue in DynamoDB |
+| **C** (on demand) | Analyst clicks "investigate" in Streamlit | One transaction | Verdict + full trace, shown live |
+| A (real-time) | Alert on SQS | Stretch only | Not planned |
+
+- **B in production**: EventBridge rule on Step Functions execution status change (source `aws.states`, status `SUCCEEDED`, state machine `is459-etl-v2-silver-wap`), reading `day` from the execution input. **[VERIFY]** input shape after the teammate's rebuild (expected `{day, source_csv_key, load_id}`).
+- **B for 14-16 Sep**: these days are already committed and will not be rerun through the pipeline, so run B manually: `python -m agent.run_batch --day 2022-09-15`.
+- **Where B runs [PROPOSED]**: a Glue Python shell job (same pattern as `is459_rt_producer`; Lambda's 15 min limit is too short for 100 cases x ~20 s). Locally, the same entrypoint runs from CloudShell/laptop.
+- **C**: imports the same `agent` package inside the Streamlit process (Streamlit is hosted on EC2 per the course lab; credentials via instance role or `~/.aws/credentials`).
+- Rate limits: bounded concurrency (default 4) with exponential backoff and `Retry-After`.
+
+---
+
+## 5. Data access: Athena views and tools
+
+### 5.1 Label-free views [PROPOSED]
+Create views in `is459_aml_gold`:
+- `v_agent_scores` = `bq1_risk_scores_medium_v2` minus the label column (and any other label-derived column)
+- `v_agent_edges` = `bq2_graph_edges_medium_v2` (**[VERIFY]** it has no label column; drop it if present)
+- reasons table/view over `bq1_explanations_top1pct.csv` (external table or loaded copy)
+
+The agent's role gets Athena + Glue read + S3 read on the Gold prefixes needed by these views only. It gets **no access to Silver** (which holds the label).
+> **Update (D4):** there is no separate role. Everyone uses the one IAM user `g1team5`, and IAM cannot hide a column inside a Parquet file anyway. The label is kept out by (a) the label-free views, (b) the column allowlist in the SQL builder, and (c) a unit test that fails if a label column appears. The evaluation code is a separate module that the agent never imports.
+> **Update:** the label `evaluation_is_laundering` is **also in the edge table**, so `v_agent_edges` must drop it. The features table calls it `is_laundering`.
+
+### 5.2 Tools
+All tools return JSON with an `ids` list (every transaction/account ID in the result) so the validator can check citations. All SQL is parameterised from an allowlist; no free-form SQL from the LLM.
+
+```
+get_alert(txn_id) -> {txn_id, txn_date, ts, sender, receiver, amount, currency,
+                      risk_score, risk_rank_global, risk_rank_day, reasons|null, ids}
+
+get_case_graph(txn_id, window_h=48) -> {upstream:[edge...], downstream:[edge...],
+                      per_currency_totals, n_upstream, n_downstream,
+                      window_truncated, horizon_end, ids}
+   # edge: {txn_id, ts, sender, receiver, amount, currency}
+   # filter on txn_date range first (partition pruning); semantics per BQ2 handover
+
+get_neighbour_scores(txn_ids, txn_dates) -> [{txn_id, risk_score, risk_rank_global,
+                      risk_rank_day, in_day_top_k, has_reasons}]
+   # must receive txn_dates so the query prunes partitions (never scan by txn_id alone)
+
+get_related_alerts(accounts, window_h, day) -> [{txn_id, ts, risk_rank_day, account}]
+   # other top-K alerts touching the same accounts in the window
+
+submit_decision(decision_json) -> validated by code (section 6.3); the only way to finish
+```
+
+(`get_account_state` from earlier drafts is dropped; DynamoDB real-time state belongs to the real-time lane.)
+
+Caching: per-process LRU on tool arguments so repeated calls and reruns do not re-bill Athena. Athena cost is about US$0.0005 per lookup at 100 MB, negligible.
+
+---
+
+## 6. The agent loop
+
+### 6.1 Loop
+```
+seed = get_alert(txn_id)  (executed by code, not the LLM)
+for step in 1..5:
+    LLM sees: policy prompt + seed + all prior tool results (compact JSON)
+    LLM returns either: a tool call, or submit_decision
+    code executes the tool, appends result
+    if submit_decision: validate (6.3); on pass -> done
+on step 5 without a valid decision, or on failed validation after 1 repair retry:
+    fallback = deterministic baseline verdict (section 8), flagged fallback=true
+```
+Use temperature 0. Use native tool/function calling if the model supports it; otherwise a strict JSON action protocol.
+
+### 6.2 Policy prompt (outline, keep it short)
+- Role: triage assistant for an alert review team; tools are read-only; you cannot see labels.
+- Goal: decide a verdict using only tool results; cite evidence IDs.
+- Decision guide (examples, not hard rules):
+  - Reasons corroborated by the graph (e.g. reason says burst/new pair and the graph shows it) -> `escalate`.
+  - Several neighbours also rank high in BQ1 -> `merge_into_case`.
+  - A neighbour with a low BQ1 rank that sits in a fast chain with high-ranked members -> `promote` it.
+  - Graph shows nothing that supports the reasons -> `deprioritise`.
+  - No graph (self-transfer, no edges) or truncated window -> say so, lower confidence.
+- Do not write numbers from memory; use claim codes and IDs.
+
+### 6.3 Output schema and validation
+```json
+{
+  "verdict": "escalate | merge_into_case | promote | deprioritise | need_more",
+  "confidence": "low | medium | high",
+  "case_id": "string|null",
+  "promoted_txn_ids": ["..."],
+  "claims": [
+    {"code": "REASONS_CORROBORATED | NEIGHBOURS_HIGH_RISK | FAST_CHAIN |
+              REPEAT_ACCOUNT_ALERTS | REASONS_NOT_SUPPORTED |
+              NO_GRAPH_AVAILABLE | TRUNCATED_WINDOW | NO_REASONS_AVAILABLE",
+     "evidence_ids": ["..."]}
+  ],
+  "note": "optional, max 200 chars"
+}
+```
+Validation (all in code):
+1. JSON parses and matches the schema; verdict and claim codes are in the enums.
+2. Every `evidence_ids`, `promoted_txn_ids` and `case_id` member appears in some tool result `ids` from this run.
+3. `promote` requires each promoted ID to come from `get_neighbour_scores` with `in_day_top_k = false`.
+4. `note` may contain digits only if the digits appear in tool outputs; otherwise strip or reject.
+5. `NO_GRAPH_AVAILABLE` / `TRUNCATED_WINDOW` claims must match the tool flags (code checks the flags itself; the LLM cannot assert them falsely).
+
+Streamlit renders sentences from **claim code + tool numbers via templates**. The LLM never writes the displayed numbers. (This is the lesson from the earlier summariser attempt; do not reintroduce free-text numeric summaries.)
+
+Log per run: steps, tool calls, tokens in/out, latency, validation outcome, `repair_used`, `fallback`.
+
+---
+
+## 7. Cases and the agent-adjusted review list
+
+### 7.1 Case grouping (deterministic, no LLM)
+Input: top-N alerts for the day by `risk_rank_day`.
+Union-find: connect two alerts if they share an account (sender or receiver) and their timestamps are within the window (default 48 h). Cap case size (default 20). Representative = best-ranked member. B runs the agent once per case, seeded by the representative, with all members available via `get_related_alerts`.
+
+### 7.2 Review list construction (budget K, default 500 per day)
+- Baseline list L0: top K by BQ1 `risk_rank_day`.
+- Agent list L1 [PROPOSED]:
+  1. Start from L0.
+  2. `escalate` / `merge_into_case`: members move up, grouped by case.
+  3. `promote`: promoted neighbours are inserted near their case; to hold the budget at K, evict from the **bottom** of L0, preferring items the agent verdicted `deprioritise`, then lowest-ranked unreviewed items.
+  4. `deprioritise`: moved down within the list; stays in the queue (never deleted).
+- Honest consequence: at a fixed budget K, promotions displace items and **can lower recall if wrong**. Report both the fixed-K result and an extended-budget variant (K + number of promotions).
+
+---
+
+## 8. Deterministic baseline (required)
+
+Same tools, no LLM, a fixed script, to show what the LLM adds:
+- For each top-N alert: `get_case_graph(48h)`, `get_neighbour_scores`.
+- Promote neighbours whose `risk_rank_day <= R2` (default R2 = 5,000) and that are within the 48 h chain; group alerts into cases with the same union-find; escalate cases with at least M high-ranked members (M=2); deprioritise alerts with no neighbours.
+- It is also the **fallback** when the LLM output is invalid.
+- Evaluation systems: S0 = BQ1 order; S1 = deterministic triage; S2 = LLM agent.
+
+---
+
+## 9. LLM client and cost
+
+> **Update (D1):** the first two bullets are superseded. Use the **Bedrock Converse API** with **Nova 2 Lite** (`us.amazon.nova-2-lite-v1:0`); the model ID is a config value. On 21 Oct a tool-calling test passed for: Nova 2 Lite, Nova Pro, `openai.gpt-oss-120b-1:0`, `qwen.qwen3-next-80b-a3b`, `deepseek.v3.2`, `mistral.mistral-large-3-675b-instruct`, `zai.glm-4.7`. Anthropic models are AccessDenied. If Nova does poorly on the 20-alert test (milestone 4), try gpt-oss-120b or DeepSeek V3.2 next.
+
+- Use an OpenAI-compatible client with config via env/Secrets Manager: `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`. Swappable between OpenRouter, Gemini's OpenAI-compatible endpoint, etc. by changing config only.
+- Why external: no Bedrock access. Self-hosting on a GPU (g5.xlarge about US$1/h) was rejected: cost shape, weaker tool calling, GPU quota risk.
+- Free tiers: OpenRouter `:free` models are capped (20 req/min; 50/day, or 1,000/day after buying 10 credits). Gemini free limits are low and unofficial. Use free models only for development.
+- Budget estimate **[PROPOSED]** (not measured): about 25k input + 1.5k output tokens per run, about 1,000 runs total -> roughly US$8-9 on a Flash-Lite-class model, about US$25 on a Flash-class model. Measure on the first 20 runs and update. Add a hard global spend/run cap in config.
+- The dataset is synthetic, so sending it to an external API has no privacy problem.
+
+---
+
+## 10. Storage
+
+DynamoDB (on demand), tables [PROPOSED]:
+- `is459_agent_decisions`: pk `day` (e.g. `2022-09-15`), sk `txn_id`. Attributes: `trigger` (B/C), `verdict`, `confidence`, `case_id`, `claims`, `promoted_txn_ids`, `note`, `fallback`, `repair_used`, `steps`, `tokens_in`, `tokens_out`, `latency_ms`, `model`, `created_at`, `trace_key`.
+- `is459_agent_cases`: pk `day`, sk `case_id`. Attributes: `members`, `representative`, `verdict`, `review_order`.
+- Traces: `s3://is459-aml-g1t5/agent/traces/<day>/<txn_id>.json` (full tool calls and results).
+- Idempotency: rerunning B for a day overwrites that day's rows (same keys). No versioning. Trigger C does not write decisions by default; it returns the result and trace to Streamlit (optionally save to `agent/traces/`).
+- Cast DynamoDB numbers/strings explicitly (the real-time alert events carry numbers as strings).
+
+Tag every resource `project=is459-g1t5-agent`. Add a small AWS Budget guardrail for the agent (suggest US$20).
+
+---
+
+## 11. Streamlit contract
+
+> **Update:** the Streamlit app will probably change again after the agent loop and the ETL rebuild are done, so keep the agent's interface (`investigate()`, the DynamoDB tables, the claim templates) independent of the UI. The app must state that **the data ends on 16 Sep 2022**, so later alerts have a shortened downstream window. Where the app runs (laptop or EC2) is not decided; both the current app and Owen's use the default boto3 credential chain.
+
+Streamlit is being redesigned; this is what the agent must provide:
+- Queue view: day selector; table from `v_agent_scores` ordered by BQ1 rank, joined with `is459_agent_decisions` (verdict badge, case id). Toggle between BQ1 order and agent-adjusted order.
+- Case view: BQ2 graph for the selected alert (window selector 6-72 h), highlighting promoted neighbours.
+- "Investigate" button: calls `agent.investigate(txn_id, window_h)`; shows verdict, claims rendered via templates, evidence list (clickable IDs), and the step trace.
+- Live alerts panel (optional): reads `is459_rt_alerts` (not SQS).
+- Always show the disclaimer: reasons are model explanations; data is synthetic.
+
+---
+
+## 12. Build order and acceptance tests
+
+1. **Data access** — create label-free views; `get_alert`, `get_case_graph`, `get_neighbour_scores`, `get_related_alerts` with unit tests. Accept: demo alert `txn_630dea...` returns graph and scores; each lookup scans <= ~150 MB; label column absent from every result (test fails if it appears).
+2. **Case grouping + deterministic baseline (S1)** — run for 15 Sep. Accept: deterministic, reproducible output; cases and promotions listed.
+3. **Evaluation harness** — offline script (separate credentials) computing metrics for S0 and S1 on 14-16 Sep. Accept: S0 recall@1% reproduces about 0.63.
+4. **LLM loop + validation** — with a free model first. Accept: on 20 test alerts, report valid-output rate, repair rate, fallback rate, tokens per run.
+5. **Batch runner (B)** — `run_batch --day`, bounded concurrency, writes decisions/cases/traces. Accept: a rerun is idempotent.
+6. **Streamlit integration (C)** — `investigate()` plus trace rendering. Accept: demo alert end to end.
+7. **Full evaluation** — S0 vs S1 vs S2 on 14-16 Sep with the chosen model; produce the report tables. Accept: all metrics in section 13 computed.
+8. **EventBridge wiring for B** (last, optional for the demo).
+
+---
+
+## 13. Evaluation plan
+
+- Days: 14, 15, 16 Sep (BQ1 test days). Note the truncated downstream window on 16 Sep; report with and without it.
+- Review budget: K = 500/day (matches the real-time alert threshold); also report K = 100 and 1,000.
+- Systems: S0 (BQ1 order), S1 (deterministic triage), S2 (LLM agent).
+- Metrics:
+  - Recall@K and precision@K of laundering transactions (labels used here only)
+  - Chain neighbours recovered: laundering transactions outside BQ1's top-K that enter the review list
+  - Displacement cost: laundering transactions pushed out of the top-K
+  - Workload: review items per case
+  - Agent validity: valid-output rate, repair rate, fallback rate, rejected-citation rate
+  - Cost and latency per run; agreement and reversal rate between S1 and S2
+- Reproducibility: temperature 0; repeat a 50-alert subset 3 times to report variance.
+- Claims must be modest: synthetic data; reasons are not proof; if S2 does not beat S1, report that and what the LLM adds qualitatively (traces, flexibility) rather than overstating.
+
+Out of scope / stretch: Trigger A (real-time). If attempted later, the tools need an `as_of` timestamp so they cannot see data after the alert time, and downstream evidence will not exist yet (verdicts would be provisional). A separate pipeline-ops agent is also out of scope.
+
+---
+
+## 14. Verify first (Claude Code checklist)
+
+1. Gold table schemas: exact column names in `bq1_risk_scores_medium_v2`, `bq1_features_medium_v2`, `bq2_graph_edges_medium_v2` (txn id, timestamps, account keys, amount, currency, split, rank, label column name).
+2. Whether the label column exists in the edge table.
+3. Edge table date horizon (`max(txn_date)`) and the exact window semantics in the BQ2 code/handover (anchor transaction, upstream/downstream definition, whether the anchor is included).
+4. Location and schema of `bq1_explanations_top1pct.csv`; whether a table already exists.
+5. Per-day rank: how to compute `risk_rank_day` (`row_number()` over day) and whether `data_split` marks test rows.
+6. Athena workgroup, result location, and IAM role the agent should use; whether views can be created in `is459_aml_gold`.
+7. Existing code to reuse: BQ2 lookup queries, BQ1 explanation code, the earlier Copilot design (`IS459_AI_Investigation_Copilot_Implementation_Plan.docx`: guardrails and `CaseContext`; the LLM summariser itself is dropped).
+8. Rebuilt ETL: state machine name, execution input shape, and that Gold v2 table names and partitioning are unchanged.
+9. Existing Streamlit code and how it authenticates to AWS.
+
+---
+
+## 15. Risks and open decisions
+
+- **LLM choice and key** — undecided; pick after the 20-alert validity test (section 12, step 4).
+- **N (cases per day) and K (review budget)** — defaults above; tune against cost and rate limits.
+- **Truncated horizon** — alerts near the end of 16 Sep cannot see their full 48 h downstream; mitigate with the flag, or optionally read v1 edges for a complete horizon (**[VERIFY]** whether v1 edge data covers later days).
+  > **Update (F6):** this is wider than the end of 16 Sep. With 48 h, **every 15 Sep and 16 Sep alert** is truncated downstream; only 14 Sep has the full window. v1 has just ~900 edges after 16 Sep, so it cannot fill the gap. The flag is the only mitigation, and the evaluation reports results per day with 14 Sep as the clean day.
+- **Displacement risk** — promotions can hurt recall at fixed K; that is why S1 and the extended-budget comparison exist.
+- **LLM adds little over S1** — possible; then the honest story is explainability and trace, not accuracy.
+- **Synthetic-data bias** — state it in the report.
+- **Cost drift** — enforce the spend cap; use cached tool results; reruns overwrite the same keys.
+---
+
+## 16. Progress log and findings
+
+### Progress
+
+| Date | Milestone | What was done |
+|---|---|---|
+| 21 Oct | 0 Verify first | Section 14 checklist run (findings F1-F12). Bedrock tool-calling test across 8 models. AWS spend checked. |
+| 21 Oct | 1 Data access | Uploaded the reasons CSV and created `bq1_explanations_top1pct_v2`. Created views `v_agent_scores` and `v_agent_edges`, and the bucketed agent tables `agent_scores_v2`, `agent_edges_v2` and `agent_day_queue_v2` (D13). Built `src/agent/` (sql, data, tools, contracts) and `execute_query_with_stats`, plus 49 new unit tests (348 in total pass, no AWS needed). Smoke run on real Athena passed (numbers below). Not committed yet. |
+| 21 Oct | **1 Data access: DONE** | All acceptance checks pass (section 18). |
+
+**Milestone 1 smoke run** (`python -m scripts.smoke_agent_tools`, 21 Oct). Each figure is one call; repeats are served from the cache at 0 MB.
+
+| Case | get_alert | get_case_graph 48h | get_neighbour_scores | get_related_alerts |
+|---|---|---|---|---|
+| Demo, 14 Sep (22 neighbours) | 4.9 MB, 3.2 s | 44.0 MB, 2.6 s | 104.5 MB, 3.4 s | 1.2 MB (3 day queues, cached afterwards) |
+| 16 Sep rank 10 (truncated) | 7.7 MB, 2.5 s | 27.6 MB, 2.6 s | 23.8 MB, 2.6 s | cached |
+| 15 Sep rank 40,000 (no reasons, no graph) | 5.0 MB, 2.6 s | 5.5 MB, 2.5 s | (no neighbours) | cached |
+
+That is 224 MB in total for the three alerts. The first design, which read `v_agent_scores` and Gold edges directly, scanned 3,077 MB and up to 839 MB per call. Each call takes about 2.5 s of Athena overhead. With `--compare-bq2`, the agent's case query returns **exactly the same edges** as the BQ2 owner's query at 6, 48 and 72 h for all three alerts.
+
+Setup notes: `.venv` uses Python 3.13 (3.12 is not installed; all the pinned dependencies work). Run the tests with `pytest tests`: a bare `pytest` fails at collection because the root `test_athena.py` and `tests/unit/test_athena.py` have the same module name. That problem was already in the repo.
+
+AWS spend (Cost Explorer, 21 Oct): Sep US$8.00; Oct to date US$17.60 (forecast US$22.89). About **US$224 left** of the US$250 course credit, assuming nothing was spent before September. The AWS budget alarms are monthly and account-wide (the ETL and real-time "guardrails" show the same total), so none of them tracks the total credit.
+
+### Findings (section 14 checklist, 21 Oct)
+
+- **F1 Schemas [VERIFIED].**
+  - `bq1_risk_scores_medium_v2`: `transaction_id, source_account_key, target_account_key, transaction_timestamp, risk_score, risk_rank, model_name, model_version, data_split, evaluation_is_laundering, txn_date`.
+  - `bq2_graph_edges_medium_v2`: `transaction_id, transaction_timestamp, source/target_account_key, source/target_entity_id, source/target_entity_name, amount_paid decimal(23,6), payment_currency, amount_received, receiving_currency, payment_format, is_cross_entity, is_cross_bank, is_cross_currency, evaluation_is_laundering, txn_date`.
+  - `bq1_features_medium_v2`: the 26 features plus `is_laundering`.
+- **F2 The label is in the edge table too** (`evaluation_is_laundering`). `v_agent_edges` must drop it.
+- **F3 v1 = v2 on 14-16 Sep.** Same rows, scores and ranks in the BQ1 scores table, and the same edge counts per day. v2 scores cover **only 14-16 Sep**. The v2 edge table covers 1-16 Sep: its 1-13 Sep partitions point at v1's S3 folders, and 14-16 Sep at v2's own folders.
+- **F4 14 Sep has a validation slice.** 00:00-05:37 on 14 Sep is `data_split = 'validation'` (488,561 rows); the rest of 14-16 Sep is `test`. The per-day queue and the evaluation must use test rows only.
+- **F5 Reasons file.** Owen built it (`AML_Streamlit_App_Owen.zip`: `data/bq1_explanations_top1pct.csv` and `explanations/make_explanations.py`), from v1. All 62,504 IDs equal the top 1% of the v2 test queue, so it is valid for v2. Columns: `transaction_id, feature_N, reason_N, contribution_N` (N = 1-3). Reasons start with ↑/↓. Some contain quoted commas, so it needs OpenCSVSerde. Now in Athena as `is459_aml_gold.bq1_explanations_top1pct_v2` (S3 `gold/bq1/v2/explanations/`).
+- **F6 The data ends on 16 Sep 23:59.** v1 has only ~900 edges for 17-27 Sep. With 48 h, every 15-16 Sep alert's downstream window is truncated; only 14 Sep is complete. Upstream is unaffected.
+- **F7 Neighbours before 14 Sep have no v2 score.** Upstream edges for an early 14 Sep alert can fall on 12-13 Sep, and v2 scores do not cover those days. v1 has scores for them, but those rows are train/validation, which the model has seen.
+- **F8 BQ2 window semantics** (`src/bq2/queries.py::build_case_edges_query`):
+  - The graph is one hop.
+  - Upstream = edges **into the alert's sender** with `ts <= alert_ts` and gap <= window.
+  - Downstream = edges **out of the alert's receiver** with `ts >= alert_ts` and gap <= window.
+  - The alert itself is returned as an `ALERT` row; each edge has a `gap_minutes` value.
+  - It prunes on `txn_date`, and the v2 edges contain no self-transfers.
+  - `build_alert_lookup_query` has **no date filter** (about 0.9 GB scan), so the agent must not use it.
+- **F9 Athena.** Workgroup `primary`, which has a 10 GB per-query scan limit. Its default output location is someone else's bucket, so the agent must set `s3://is459-aml-g1t5/athena-results/agent/`. We can create tables and views in `is459_aml_gold`.
+- **F10 Cost of `v_agent_scores`.** One lookup recomputes the whole day's rank: about **134 MB and 11 s** on 15 Sep. That is under the 150 MB target but slow, and a lookup across several days would be several times more (see D8).
+- **F11 IAM / auth.** One IAM user (`g1team5`) for everything, no roles. Both Streamlit apps use the default boto3 credential chain (laptop login).
+- **F12 ETL.** State machine `is459-etl-v2-silver-wap` exists (the pre-rebuild version); its last run succeeded on 18 Oct. Current execution input: `{"day", "day_compact", "run_tag", "stream_run_id", "reconciled_landing"}`. It has `day`, which is all trigger B needs. Re-check after the rebuild (milestone 8).
+
+### Findings (milestone 1, 21 Oct)
+
+- **F13 Random keys defeat Parquet pruning; bucketing fixes it.**
+  - Transaction IDs and account keys are random hashes, so Athena reads the whole column for every day it touches. A transaction-ID lookup reads 60-100 MB per day, and the edges for one account read 10-26 MB per day per column.
+  - Every selected column is read in full for those days, so the BQ2 query's unused entity name/ID columns roughly doubled its scan.
+  - Hive bucketing (32 buckets) on the lookup key cut one ID lookup from 64 MB to 1.3 MB.
+  - Athena cannot `INSERT INTO` a bucketed table, so adding a day means rebuilding the table (D13).
+- **F14 About 2% of scored transactions are self-transfers** (36,980 / 37,010 / 54,493 on 14 / 15 / 16 Sep). They are scored and ranked but have no edge, so `get_alert` returns `amount: null` and the graph is empty (`no_graph: true`). Two of them are in the top 1% with reasons.
+- **F15 The neighbour lookup grows with the number of IDs.** A long `IN (...)` list hits most buckets: 22 neighbours scanned 104.5 MB. Calls are capped at 200 IDs, but a call near the cap on 16 Sep could exceed 150 MB. That is acceptable (cost about US$0.001); watch it in milestone 4.
+- **F16 The top of the queue all has reasons.** The top 5,000 of each day all fall within the top 1% (62,504 over the three days), so every alert the batch runner seeds (N = 100) has reasons. Alerts without reasons appear only as neighbours, or when an analyst investigates a lower-ranked alert.
+
+---
+
+## 17. Decisions
+
+| ID | Decision | Why | Status |
+|---|---|---|---|
+| D1 | LLM = **Bedrock Converse API, Nova 2 Lite** first; the model ID is config. Fall back to gpt-oss-120b / DeepSeek V3.2 if quality is poor. Replaces rule 8 and section 9's external API. | Bedrock works (only Anthropic is blocked); no external key; swapping models is a one-line change. | Agreed 21 Oct |
+| D2 | Agent code lives in **`src/agent/`** (entry points `python -m src.agent.run_batch`, `src.agent.investigate`). | Matches the existing `src/` layout and imports. | Done 21 Oct |
+| D3 | Add **new `AGENT_*` constants** to `src/config.py`; leave the existing v1 constants alone. | 12 existing files import the v1 settings; changing them could break the old app and tests. Once the ETL rebuild is done, remove the v1 constants (and the code using them) if nothing still needs them. | Agreed 21 Oct; **TODO after ETL rebuild:** review and remove v1 |
+| D4 | **No separate IAM user/role** for labels. Use views + column allowlist + a label test; the evaluation code is a separate module. | IAM cannot hide a column inside a Parquet file; Lake Formation is too heavy for this project. | Agreed 21 Oct |
+| D5 | Reasons come from Owen's CSV, uploaded as-is to `gold/bq1/v2/explanations/`; no rebuild. | It equals the v2 test top 1% exactly (F5). | Done 21 Oct |
+| D6 | `risk_rank_day` ranks **test rows only**; validation rows keep their score but get rank NULL. | F4. | Done 21 Oct (`v_agent_scores`) |
+| D7 | Neighbours dated outside 14-16 Sep return `scored: false`; **do not fall back to v1 scores**. | Those v1 rows are train/validation, so their scores are inflated (F7). Owen's app labelled them "indicative only". | Done 21 Oct |
+| D8 | **Materialise the label-free scores** as `is459_aml_gold.agent_scores_v2` (CTAS, Parquet, partitioned by `txn_date`, with `risk_rank_day` precomputed; S3 `agent/tables/agent_scores_v2/`). The tools read this table, and `v_agent_scores` stays as its definition. Trigger B adds the new day after each ETL commit. | F10: the view recomputes ranks on every call. A one-off ~250 MB build makes each later lookup scan a few MB. It also means the agent's scores data has no label column at all. | Agreed 21 Oct; extended by D13 |
+| D9 | The demo alert is picked from **14 Sep test rows** (full 48 h window): top 1% (has reasons), at least one upstream and one downstream edge, and ideally a neighbour outside the top K. | F6, and PLAN's alert is on 3 Sep (no v2 score). | Done 21 Oct: `txn_a0f703e2…` (section 1) |
+| D10 | `get_case_graph` sends **at most 50 edges per direction** to the LLM (closest in time first). Counts and per-currency totals use all edges; an `edges_capped` flag shows when the list was cut. | Busy accounts can have hundreds of edges, which would overflow the token budget. | Done 21 Oct |
+| D11 | `get_alert` takes **`(txn_id, txn_date)`**. | Lookup by ID alone scans every partition (F8). Streamlit and the batch runner always know the date. | Done 21 Oct |
+| D12 | The Streamlit app must say **"data ends on 16 Sep 2022"**. The agent stays UI-independent, because the app will change after the agent and the ETL rebuild. | F6; the user's note of 21 Oct. | Agreed 21 Oct |
+| D13 | The tools read **three bucketed or small agent tables** built from the label-free views (`sql/agent/04-06`), all under `s3://is459-aml-g1t5/agent/tables/`:<br>• `agent_scores_v2`: scores + per-day rank + payment details + reasons, bucketed by `transaction_id`<br>• `agent_edges_v2`: each edge once per endpoint with `direction` in/out, bucketed by `account_key`, 11-16 Sep<br>• `agent_day_queue_v2`: the top 5,000 per day<br>`get_case_graph` uses its **own slim case query** instead of calling `build_case_edges_query`. It applies the same window rule and returns identical edges (checked at 6/48/72 h). | F13: the first design scanned up to 839 MB per call; this one stays at or under 105 MB, and 224 MB in total for three alerts. One table read per tool. | Done 21 Oct |
+| D14 | **`data_split` never reaches the agent.** It is not in the agent tables and is on the forbidden-column list, matching the existing CaseContext guardrail. The tools expose `in_queue` (has a per-day rank) instead. | `data_split` says which rows the model trained on, so it should not go into prompts. | Done 21 Oct |
+| D15 | **Adding a day = rebuilding the agent tables**: drop each table, delete its S3 prefix, and rerun `04`, `05`, `06` with the new date range. This scans about 2.7 GB (about US$0.014). Milestone 5 wraps it in one command, run before the batch (trigger B). Remember to widen `AGENT_SCORED_DATES` / `AGENT_DATA_HORIZON` in config. | Athena cannot insert into bucketed tables (F13); a full rebuild is simple and idempotent. | Agreed with D13; implement in milestone 5 |
+
+---
+
+## 18. Milestone 1 plan: data access (detailed)
+
+**Status: DONE 21 Oct.** Results are in section 16. The plan below is kept as written; the build differs from it as follows:
+- Extra tables: `sql/agent/05_agent_edges_v2.sql` and `06_agent_day_queue_v2.sql`. `04` is bucketed and also holds the reasons and payment details (D13). The tools read only `agent_scores_v2`, `agent_edges_v2` and `agent_day_queue_v2`. The views and the reasons table are only build sources.
+- `get_case_graph` uses its own slim query, not `build_case_edges_query`. The equivalence check is `--compare-bq2`. The query does not return the alert row.
+- `data_split` is not returned (D14); `in_queue` replaces it.
+- `get_neighbour_scores` returns `{neighbours: [...], ids}` and `get_related_alerts` returns `{alerts: [...], top_k, window_h, ids}`, so every tool output is a dict with `ids`.
+- `get_related_alerts(accounts, anchor_ts, window_h, exclude_txn_ids=())`; top K is at most 5,000 (the size of the queue table).
+- Config names as built: `AGENT_SCORES_TABLE`, `AGENT_EDGES_TABLE`, `AGENT_QUEUE_TABLE`, `AGENT_QUEUE_MAX_K`, `AGENT_MAX_NEIGHBOUR_IDS`, `AGENT_FORBIDDEN_COLUMNS` (it also includes `data_split` and the laundering-pattern fields).
+
+Goal: four read-only tools that return compact, label-free JSON with an `ids` list, tested without AWS, plus one real-AWS smoke run on the demo alert.
+
+### Files
+
+```
+sql/agent/01_bq1_explanations_top1pct_v2.sql   (done)
+sql/agent/02_v_agent_scores.sql                (done)
+sql/agent/03_v_agent_edges.sql                 label-free edges view
+sql/agent/04_agent_scores_v2.sql               CTAS + per-day INSERT (if D8 is accepted)
+src/config.py                                  + AGENT_* constants (D3)
+src/aws/athena.py                              + execute_query_with_stats() (bytes scanned, ms); execute_query unchanged
+src/agent/__init__.py
+src/agent/contracts.py                         TypedDicts for the tool outputs
+src/agent/sql.py                               query builders: column allowlist, label guard, input validation
+src/agent/data.py                              Athena runner: LRU cache keyed on SQL, scan log, runtime label check
+src/agent/tools.py                             get_alert, get_case_graph, get_neighbour_scores, get_related_alerts
+tests/unit/test_agent_sql.py
+tests/unit/test_agent_tools.py                 fake runner, no AWS
+scripts/smoke_agent_tools.py                   real AWS: demo alert end to end, prints bytes/latency
+```
+
+### Config constants (D3)
+
+`AGENT_SCORES_TABLE` (D8 table, or `v_agent_scores` until then), `AGENT_EDGES_VIEW = v_agent_edges`, `AGENT_REASONS_TABLE = bq1_explanations_top1pct_v2`, `AGENT_ATHENA_OUTPUT = s3://is459-aml-g1t5/athena-results/agent/`, `AGENT_DATA_HORIZON = 2022-09-16 23:59:59`, `AGENT_SCORED_DATES = 14-16 Sep`, `AGENT_TOP_K = 500`, `AGENT_WINDOW_H_DEFAULT = 48` (allowed 6-72), `AGENT_MAX_EDGES_PER_DIRECTION = 50`, `AGENT_MODEL_ID = us.amazon.nova-2-lite-v1:0`, `LABEL_COLUMNS = {evaluation_is_laundering, is_laundering}`.
+
+### Tool contracts
+
+- **`get_alert(txn_id, txn_date)`** returns `{found, txn_id, txn_date, ts, sender, receiver, amount, currency, payment_format, risk_score, risk_rank_global, risk_rank_day, data_split, in_day_top_k, reasons, ids}`.
+  - One query: scores (filtered by date) LEFT JOIN reasons, plus the alert's edge row (filtered by date) for the amount and currency.
+  - `reasons` is a list of `{feature, sentence, direction: up|down, contribution}`, or `null` when the alert is not in the top 1%.
+  - Not found returns `{found: false}`.
+- **`get_case_graph(alert, window_h=48)`** returns `{upstream:[edge], downstream:[edge], n_upstream, n_downstream, n_upstream_accounts, n_downstream_accounts, per_currency_totals:{upstream:{ccy:amt}, downstream:{ccy:amt}}, window_h, window_truncated, horizon_end, edges_capped, ids}`.
+  - An edge is `{txn_id, txn_date, ts, sender, receiver, amount, currency, payment_format, gap_minutes}`.
+  - Reuses `build_case_edges_query` **unchanged** (its SQL is hash-pinned by existing tests), pointed at `v_agent_edges`. A `window_minutes` value is computed from `window_h`.
+  - `window_truncated = alert_ts + window > AGENT_DATA_HORIZON`, worked out in code from config, not by the LLM.
+  - Totals are grouped per currency and never summed across currencies (rule 5).
+- **`get_neighbour_scores(txn_ids, txn_dates)`** returns a list of `{txn_id, scored, risk_score, risk_rank_global, risk_rank_day, data_split, in_day_top_k, has_reasons}`.
+  - It needs dates and filters `txn_date IN (...)`. At most 200 IDs per call.
+  - Dates outside 14-16 Sep return `scored: false` without a query (D7).
+- **`get_related_alerts(accounts, anchor_ts, window_h)`** returns a list of `{txn_id, ts, risk_rank_day, account, role: sender|receiver}`.
+  - Other top-K alerts on the same accounts within ±window of the anchor.
+  - Served from a cached **day queue**: the top K of each day, one small query per day per process, filtered in Python. No per-call Athena scan.
+
+All tools: inputs are validated (IDs `txn_[A-Za-z0-9]+`, account keys without quotes, dates inside the allowed set, window 6-72); SQL is built only from allowlisted columns; results go through a runtime check that raises if a label column appears; every transaction and account ID in the result is in `ids`; numbers are cast explicitly (Athena returns strings).
+
+### Steps (in order)
+
+0. Create `.venv` from `requirements.txt` (there is no local environment with boto3 yet).
+1. SQL: write and apply `03_v_agent_edges.sql`. If D8 is accepted, write and apply `04_agent_scores_v2.sql` (CTAS for 14-16 Sep). Verify row counts against F3/F4 and that no label column exists.
+2. Add the config constants and `execute_query_with_stats`.
+3. `src/agent/sql.py` + `test_agent_sql.py`: builders, allowlist, input validation, label guard (the test fails if any builder could emit a label column).
+4. `src/agent/data.py`: runner, cache, scan log, runtime label check.
+5. `src/agent/tools.py` + `test_agent_tools.py` with a fake runner: output shapes, `ids` complete, `reasons: null` path, truncation flag at the edges of the horizon (14 Sep vs 15/16 Sep), per-currency totals, the edge cap, unscored neighbours, empty graph.
+6. Pick the demo alert (D9) with one query; record it in section 1.
+7. `scripts/smoke_agent_tools.py` on real AWS: run all four tools on the demo alert plus one 16 Sep alert (truncated) and one without reasons; record bytes scanned and latency per tool in section 16.
+
+### Acceptance (milestone 1 is done when)
+
+- `pytest` passes with no AWS access, including the existing tests.
+- The smoke run returns the demo alert with reasons, a graph with at least one upstream and one downstream edge, and neighbour scores.
+- Each tool call scans **<= 150 MB**, and a repeated call is served from the cache (0 bytes).
+- No label column appears in any result (unit test plus runtime check).
+- Section 16 is updated with the measured numbers and the demo alert.
