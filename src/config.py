@@ -15,7 +15,7 @@ BQ2_EDGE_TABLE = "is459_aml_gold.bq2_graph_edges_medium_v1"
 
 BQ2_ATHENA_OUTPUT = "s3://is459-aml-g1t5/athena-results/bq2/"
 
-# Anthropic models are not available on this account's Bedrock; Amazon Nova is.
+# Model for the older AI summary code (src/ai). The agent has its own setting below.
 BEDROCK_MODEL_ID = "us.amazon.nova-2-lite-v1:0"
 
 # --- Triage agent (PLAN.md). Reads only the label-free agent tables (sql/agent/).
@@ -42,7 +42,8 @@ AGENT_WINDOW_H_MAX = 72
 AGENT_MAX_EDGES_PER_DIRECTION = 50
 AGENT_MAX_NEIGHBOUR_IDS = 200
 
-AGENT_MODEL_ID = BEDROCK_MODEL_ID
+# Sonnet 4.5 first (PLAN.md D23). Anthropic access was denied on 21 Oct and worked on 6 Nov.
+AGENT_MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 # Ground-truth columns that must never reach the agent or its prompts.
 AGENT_FORBIDDEN_COLUMNS = frozenset(
