@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from src import config
-from src.agent.claims import case_id_for
+from src.agent.brief import case_id_for
 
 
 @dataclass(frozen=True)

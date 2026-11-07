@@ -2,18 +2,16 @@
 
 Owner: Claire (agent and evaluation). Last updated 7 Nov 2026. Team split: `WORK_SPLIT.md` (deleted from the working folder but still in git: `git show HEAD:WORK_SPLIT.md`). ETL and real-time details: `ETL_v2_Handover.docx` (kept outside this repo).
 
-**Status:** the ETL and real-time pipelines are finished. The agent is built as a triage tool: it gives each case a verdict of `raise`, `dont_raise` or `not_sure`. Its rules are frozen in commit `91e344e` (not pushed), and 435 unit tests pass. Tests on 14 Sep (F33, F34) showed the verdict mostly repeats BQ1, so on 7 Nov the owner decided to turn the agent into an investigation assistant (D31): tools in section 5.3, input and output in section 6. Person 2 still has to agree the output format. Nothing from the current rules is saved yet. DynamoDB holds only out-of-date 14 Sep rows (F29), and no one has looked at labels.
+**Status:** the ETL and real-time pipelines are finished. On 7 Nov the agent was rebuilt as an investigation assistant (D31): it writes an evidence brief per case with no verdict. The tools (5.3), the finding rules (`findings.py`), the LLM loop and validator, the code-only brief S1 (`baseline.py`), storage rows, review list and sample data are all done and covered by 492 unit tests, which use fakes. **Nothing new has run on real Athena or Bedrock yet**, and the finding thresholds in `config.py` are placeholders. Streamlit has not started, so the output format (`docs/agent_output_format.md`) needs no one's agreement and can still change. The old triage version is frozen in commit `91e344e` (not pushed) as a fallback. DynamoDB holds only out-of-date 14 Sep rows (F29), and no one has looked at labels.
 
 ## Where to continue
 
-1. **Get Person 2's agreement to the output format (D31, section 6.3).** They build the app against it, so agree before any code changes. Check that the timeline allows it. If not, fall back to the frozen triage version: run its batch, and evaluate `raise` against `not_sure`.
-2. **Write the new output format** in `docs/agent_output_format.md` (section 6.3), and get Person 2's agreement.
-3. **Build the tools in section 5.3**, in that order: the new `get_case_graph` fields, then `get_account_activity`, then the `get_related_alerts` extension.
-4. **Build S1 as a brief from code alone** (section 8). It finds the same patterns by fixed rules, with no LLM.
-5. **Build the LLM brief (S2):** prompt, contract, validator and claim rendering (section 6). The review list keeps BQ1's order (section 7.2).
-6. **Take reasons out of the agent's inputs and out of the app** (D32, F35). No `nan` fix is needed.
-7. **Do a dry run on 14 Sep, then freeze** before anyone looks at labels. Then run 14, 15 and 16 Sep with `--save` (about US$12) and record the run IDs here.
-8. **Evaluation** (section 13), then the **new-day path** and **recordings** (section 19).
+1. **Run the new tools on real Athena:** `python -m scripts.smoke_agent_tools` (extended for `get_account_activity` and the new graph fields). Check bytes scanned per call, and the query time and size for a busy account. Nothing in the new tool layer has touched Athena yet.
+2. **Set the thresholds** in `config.py` (section 6.3), from label-free distributions of the 14-16 Sep top alerts and of ordinary accounts. Run `python -m scripts.run_s1 --day 2022-09-14 --out <file>` to see how often each finding fires. Write the rule you used next to each value. They are placeholders now.
+3. **Dry run on 14 Sep**, then check the step cap of 8 (it was 5), cost and fallback rate, and **freeze in a commit** before anyone looks at labels. Then run 14, 15 and 16 Sep with `--save` (about US$12; the per-case cost will be higher now, so measure it) and record the run IDs here.
+4. **Evaluation** (section 13), then the **new-day path** and **recordings** (section 19).
+5. **Still open from D31:** `ACTIVITY_SPIKE` is built but is the lowest priority; drop it if the dry run shows it adds noise. The loop only lets the LLM pass account IDs that tools have returned to `get_related_alerts`.
+6. Done on 7 Nov: output format (`docs/agent_output_format.md`), tools in 5.3, S1 as a brief, LLM brief with validator and sentences, review list in BQ1 order, reasons removed from the agent and its SQL (D32, F35). No `nan` fix is needed.
 
 Keep this file short: current facts and decisions only. Section, finding and decision numbers have gaps because code comments cite them, so don't renumber them. Git history has everything removed.
 
@@ -37,8 +35,8 @@ Keep this file short: current facts and decisions only. Section, finding and dec
 3. **Never remove an alert from the BQ1 queue.** BQ1 decides the order; the agent adds evidence.
 4. **All numbers and IDs come from tools.** The LLM picks tools and finding codes, and writes text with no numbers. Code checks every cited ID and writes the displayed sentences.
 5. **Currency-safe.** Never sum across currencies.
-6. **Bounded.** At most 8 tool steps per run (proposed, was 5; confirm after the dry run), plus token, timeout and global spend caps.
-7. **Reasons are model explanations, not proof.** They stay in the data, but the agent doesn't see them and Streamlit doesn't show them (D32).
+6. **Bounded.** At most 8 tool steps per run (`AGENT_MAX_STEPS`; was 5, confirm after the dry run), plus token, timeout and global spend caps.
+7. **Reasons are model explanations, not proof.** They stay in the data, but no agent query selects them and Streamlit doesn't show them (D32).
 
 ## 3. Pipeline and purpose
 
@@ -73,14 +71,14 @@ The brief gives no verdict: the analyst decides. The current code still produces
 
 All are in `src/agent/tools.py`, and every result has an `ids` list.
 
-- `get_alert(txn_id, txn_date)`: score, day rank, payment details. Today it also returns reasons or null; D32 removes them from what the agent sees.
+- `get_alert(txn_id, txn_date)`: score, day rank, payment details. No reasons (D32).
 - `get_case_graph(alert, window_h=48)`: up to 50 edges per direction, counts and totals per currency, `no_graph`, `window_truncated`, `edges_capped`. An optional `as_of` hides later payments.
 - `get_neighbour_scores(txn_ids, txn_dates)`: at most 200 IDs. Dates outside the scored days return `scored: false`.
 - `get_related_alerts(accounts, anchor_ts, window_h)`: other top-K alerts on the same accounts. An optional `as_of` hides later alerts.
 
 **5.1 Tables:** `v_agent_scores` and `v_agent_edges` are the label-free sources for the agent tables. **5.2** Tools cache by SQL text, so repeats cost nothing.
 
-**5.3 Final tool set (D31).** Four LLM tools stay, two change, one is new, plus `submit`. Everything stays one hop (D33): no tool follows a counterparty's own payments. All results carry `ids` and honour `as_of` (D28). Build in this order.
+**5.3 Final tool set (D31, built).** Four LLM tools stay, two change, one is new, plus `submit_brief`. Everything stays one hop (D33): no tool follows a counterparty's own payments. All results carry `ids` and honour `as_of` (D28). Build in this order.
 
 | # | Tool | Change | What it gives |
 |---|---|---|---|
@@ -90,9 +88,9 @@ All are in `src/agent/tools.py`, and every result has an `ids` list.
 | 4 | `get_alert` | changed | No reasons (D32) |
 | 5 | `get_neighbour_scores` | unchanged | |
 
-History is short: `agent_edges_v2` starts on 11 Sep, so a 14 Sep alert has at most 3 earlier days. Each new tool needs a query builder in `sql.py`, a result type in `contracts.py`, a `TOOLS` entry in `prompts.py`, a branch in `loop.py`, validator rules (6.3) and tests.
+History is short: `agent_edges_v2` starts on 11 Sep, so a 14 Sep alert has at most 3 earlier days. Onward gap = minutes from the alert to each downstream payment. `get_related_alerts` takes up to `AGENT_MAX_RELATED_ACCOUNTS` accounts; in the loop the LLM may add account IDs a tool returned. The pure parts of the graph and activity tools are `case_graph_from_frame` and `account_activity_from_frames`, which the samples also use.
 
-## 6. Agent loop (built: `src/agent/llm.py`, `prompts.py`, `validate.py`, `loop.py`)
+## 6. Agent loop (built: `src/agent/llm.py`, `prompts.py`, `validate.py`, `loop.py`, `findings.py`, `brief.py`, `evidence.py`)
 
 ```
 seed = get_alert(...)   # by code
@@ -107,9 +105,9 @@ Bedrock Converse with native tool calling, temperature 0. Log steps, tokens, lat
 - **On demand** (`investigate(txn_id, txn_date, window_h)`): the same, for one alert and its case, with no cutoff.
 - **Data:** only the label-free agent tables, through the tools in 5.3.
 
-**6.2 Prompt (proposed):** an investigation assistant with read-only tools and no labels. Gather the flow around the alert and its accounts, report the patterns the results show, and pick next checks from the list. Cite IDs, give no verdict, and write no numbers.
+**6.2 Prompt (built):** an investigation assistant with read-only tools and no labels. Gather the flow around the alert and its accounts, report the patterns the results show, and pick next checks from the list. Cite IDs, give no verdict, and write no numbers.
 
-**6.3 Output and validation.** `Decision` in `src/agent/contracts.py` (verdict, confidence, claims, note) is replaced by a brief.
+**6.3 Output and validation (built).** `Decision` in `src/agent/contracts.py` was replaced by `Brief`. `findings.py` holds one set of rules used three ways: S1 reports what fires, the validator accepts an LLM finding only if the same rule fires on this run's tool results (and the finding cites its core payments and nothing outside the rule's IDs), and the displayed sentence comes from it. Thresholds are placeholders (see `config.py`) and also include a minimum onward share for `PASS_THROUGH` (not in the original plan) so that a trivial onward payment does not count.
 
 *What the LLM submits:* `findings` (list of code + `evidence_ids`), `next_checks` (list of codes), `summary`.
 
@@ -148,21 +146,19 @@ Code must check:
 4. Each next check meets its row in the next-check table.
 5. `summary` is at most 200 characters, with no digits or spelled-out numbers.
 
-*What Streamlit receives* (`InvestigateResult` and `DecisionRow` change with this): `case_id`, rendered `findings` (code, sentence, `evidence_ids`), `gaps`, `next_checks`, `summary`, `money_flow` and `members`, plus `stats`, `trace` and `fallback`. `verdict` and `confidence` are gone. Thresholds live in `config.py`, chosen before the freeze without labels.
+*What Streamlit receives* (`InvestigateResult` and `DecisionRow` are changed): `case_id`, rendered `findings` (code, sentence, `evidence_ids`), `gaps`, `next_checks`, `summary`, `money_flow` and `members`, plus `stats`, `trace` and `fallback`. `verdict` and `confidence` are gone. Thresholds live in `config.py`, chosen before the freeze without labels.
 
 ## 7. Cases and review list (built)
 
 **7.1** `src/agent/cases.py`: link alerts that share an account within the window; cap of 20; best rank is the representative.
 
-**7.2** `src/agent/review_list.py` currently orders by verdict. Proposed: keep BQ1's order, and attach the brief to each alert.
+**7.2** `src/agent/review_list.py` keeps BQ1's order and attaches the brief's codes to each alert.
 
 **7.3** Each result has `members`: every alert in the case with its payments. Code fetches any graph the LLM skipped, after it answers, so these never reach the LLM.
 
 ## 8. S1 baseline (built)
 
-`src/agent/baseline.py`, same tools, fixed rules. It is currently a triage rule: `raise` with at least 2 high-ranked transactions (members plus neighbours in the top 500), otherwise `not_sure`. It is also the LLM's fallback.
-
-Proposed: S1 becomes a brief built by code alone. It uses the same tools, finding codes and validator, with fixed thresholds in `config.py` and a template summary. The evaluation then shows what the LLM adds over code.
+`src/agent/baseline.py`: a brief built by code alone. It runs every tool for every member and applies the same finding rules, with fixed thresholds in `config.py` and a template summary. It is also the LLM's fallback. The evaluation then shows what the LLM adds over code.
 
 S0 = BQ1 order with no brief. S1 = code-only brief. S2 = LLM brief.
 
@@ -176,22 +172,22 @@ S0 = BQ1 order with no brief. S1 = code-only brief. S2 = LLM brief.
 - `is459_agent_cases` (on-demand, tagged `project=is459-g1t5-etl-v2`): key `day` + `case_id`. One item per case, singles included (`CaseRow` in `contracts.py`).
 - Traces: `s3://is459-aml-g1t5/agent/traces/<day>/<txn_id>.json`.
 - A batch rerun writes the new rows first, then deletes that day's rows it did not rewrite (scan on `day`, no index). If any case failed, nothing is written or deleted. Each alert is in one case, so each transaction gets one row.
-- The brief changes the row contents, not the tables or keys: `verdict` and `confidence` go, and the finding codes are stored so rates can be counted.
+- The brief changed the row contents, not the tables or keys: `verdict`, `confidence` and `claims` are gone, and `finding_codes`, `gap_codes`, `next_check_codes` and `summary` are stored so rates can be counted.
 
 ## 11. Streamlit
 
-Owned by Person 2. Contract: `docs/agent_output_format.md` (changes with D31). The app must say full days end on 16 Sep 2022 and the data is synthetic. It doesn't show BQ1 reasons (D32). It reads DynamoDB, never SQS.
+Owned by Person 2, not started. Contract: `docs/agent_output_format.md` (matches D31 and the code). The app must say full days end on 16 Sep 2022 and the data is synthetic. It doesn't show BQ1 reasons (D32). It reads DynamoDB, never SQS.
 
 ## 12. Milestones
 
 | # | Milestone | Owner | Status |
 |---|---|---|---|
 | 1 | Data access | Claire | Done |
-| 2 | Case grouping + S1 | Claire | Done (triage rules); code-only brief proposed |
+| 2 | Case grouping + S1 | Claire | Done (code-only brief); thresholds are placeholders |
 | 3 | Evaluation harness | Claire | To do; waits on D31 |
-| 4 | LLM loop + validator | Claire | Done for triage (`91e344e`); brief version proposed |
-| 5 | Batch runner, `investigate()` | Claire | Done; saved 14-16 Sep runs wait on D31 |
-| 6 | Streamlit | Person 2 | To do; output format changes with D31 |
+| 4 | LLM loop + validator | Claire | Done (brief version); not yet run on Bedrock |
+| 5 | Batch runner, `investigate()` | Claire | Done; saved 14-16 Sep runs wait on thresholds and the dry run |
+| 6 | Streamlit | Person 2 | Not started; output format is ready |
 | 7 | Full evaluation | Claire | To do |
 | 8 | New-day path, queue consumer | Claire | To do; required for the recorded run |
 
@@ -271,10 +267,10 @@ Owned by Person 2. Contract: `docs/agent_output_format.md` (changes with D31). T
 | D24 | Full row for the representative, short pointer rows for other members. *To confirm.* |
 | D25 | Code sets `case_id`. `investigate(txn_id, txn_date, window_h)`. *To confirm.* |
 | D26 | S1 uses the same tools with fixed rules and is the LLM's fallback. High-ranked = member or top-500 neighbour. No graph means low confidence; truncation caps the LLM's confidence at medium. |
-| D27 | Current code: verdicts `raise`, `dont_raise`, `not_sure`; code groups related alerts. Replaced if D31 is agreed. |
+| D27 | Old triage code: verdicts `raise`, `dont_raise`, `not_sure`. Replaced by D31 on 7 Nov; kept in commit `91e344e`. Code still groups related alerts. |
 | D28 | The batch and S1 see data only up to the end of the alert's day, because that is all a daily run knows. `investigate()` has no cutoff, because an analyst clicks later. |
 | D30 | The triage rules are frozen in commit `91e344e`, before anyone looked at labels. This is the fallback if D31 is not agreed. Any version is frozen in a commit before labels are read. |
-| D31 | *Owner decided 7 Nov; Person 2 to agree the output format.* The agent becomes an investigation assistant: BQ1 keeps the order, and the agent writes an evidence brief per alert or case (section 3), with no verdict. Tools in 5.3, input and output in section 6. S1 becomes a code-only brief. Evaluation as in section 13. |
+| D31 | *Owner decided 7 Nov; implemented the same day.* The agent becomes an investigation assistant: BQ1 keeps the order, and the agent writes an evidence brief per alert or case (section 3), with no verdict. Tools in 5.3, input and output in section 6. S1 becomes a code-only brief. Evaluation as in section 13. |
 | D32 | BQ1 reasons stay in the data but are not shown in Streamlit and not given to the agent. The agent never explains the BQ1 score: it reports evidence around the alert. The F35 numbers are reported as a limit of BQ1's explanations. |
 | D33 | One hop only. BQ2 is defined as one hop (6-72 h) and only that is evaluated, so the agent doesn't follow a counterparty's own payments. A second hop would be new analysis, not BQ2 output. |
 
@@ -289,13 +285,13 @@ Owned by Person 2. Contract: `docs/agent_output_format.md` (changes with D31). T
 - Checked with in-memory stores, and `publish` against the real tables with a fake day (`2099-01-01`): reruns replace exactly the day's rows.
 - Not done: `investigate()` has no save option (a save would overwrite the batch row for that alert). `rebuild_tables.py --yes` has not been run for real.
 
-**Step 5: Investigation brief (D31)** — steps 2-7 in "Where to continue". Change `contracts.py`, `prompts.py`, `validate.py`, `claims.py`, `baseline.py`, `review_list.py`, `config.py` (step cap, thresholds) and `docs/agent_output_format.md`, and add the tools in 5.3 to `tools.py`, `sql.py` and `loop.py`. Then do one 14 Sep dry run, freeze, and run 14-16 Sep with `--save`.
+**Step 5: Investigation brief (D31), built 7 Nov.** `contracts.py`, `evidence.py`, `findings.py`, `brief.py`, `validate.py`, `prompts.py`, `loop.py`, `baseline.py`, `decisions.py`, `review_list.py`, `report.py`, `sample_results.py` and the tools in 5.3 are done, with `claims.py` replaced by `brief.py`. What remains is real runs: smoke test, thresholds, one 14 Sep dry run, freeze, then 14-16 Sep with `--save` ("Where to continue").
 
 **Step 6: New-day path (milestone 8)**
 - Rank `excluded` rows too (F22), and check that 14-16 Sep ranks stay identical.
 - Widen `sql/agent/04-06`, `AGENT_SCORED_DATES` and `AGENT_DATA_HORIZON`.
 - Consumer for `is459-etl-v2-day-ready`: rebuild, run the batch, delete the message only on success (F20).
-- Check that runs with no reasons still give valid output (F23). Test with a fake message.
+- New days have no BQ1 reasons (F23), which no longer matters because the agent never reads them. Test with a fake message.
 - Done when a test message starts the batch with no manual step. Don't start until the 14-16 Sep results are saved.
 
 **Step 7: Recordings (no live demo)**

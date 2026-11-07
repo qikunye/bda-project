@@ -24,12 +24,12 @@ def fallback_reason(result: dict) -> str | None:
 
 
 def rejection_reasons(result: dict) -> list[str]:
-    """Lists the validation errors that rejected the model's decisions in this run."""
+    """Lists the validation errors that rejected the model's briefs in this run."""
 
     return [
         error
         for step in result["trace"]
-        if step["tool"] == "submit_decision" and not step["result"]["valid"]
+        if step["tool"] == "submit_brief" and not step["result"]["valid"]
         for error in step["result"]["errors"]
     ]
 
@@ -57,14 +57,17 @@ def summarise_runs(results: list[dict], failures: list[dict], spent_usd: float) 
         "fallback_reasons": dict(
             Counter(fallback_reason(r) for r in runs if r["stats"]["fallback"])
         ),
-        "rejected_decision_reasons": dict(
+        "rejected_brief_reasons": dict(
             Counter(
                 reason[:90] for r in runs for reason in rejection_reasons(r)
             ).most_common(10)
         ),
-        "verdicts": dict(Counter(r["decision"]["verdict"] for r in runs).most_common()),
-        "confidence": dict(
-            Counter(r["decision"]["confidence"] for r in runs).most_common()
+        "finding_counts": dict(
+            Counter(f["code"] for r in runs for f in r["findings"]).most_common()
+        ),
+        "cases_with_findings": sum(bool(r["findings"]) for r in runs),
+        "gap_counts": dict(
+            Counter(g["code"] for r in runs for g in r["gaps"]).most_common()
         ),
         "steps": _spread([r["stats"]["steps"] for r in runs]),
         "tokens_in_per_run": _spread([r["stats"]["tokens_in"] for r in runs]),
@@ -87,12 +90,13 @@ def print_summary(summary: dict, athena_gb: float, seconds: float) -> None:
         print(f"  {key}: {summary[key]} ({summary[rate]})")
     if summary["fallback_reasons"]:
         print("Fallback reasons:", summary["fallback_reasons"])
-    if summary["rejected_decision_reasons"]:
+    if summary["rejected_brief_reasons"]:
         print("Most common rejections:")
-        for reason, count in summary["rejected_decision_reasons"].items():
+        for reason, count in summary["rejected_brief_reasons"].items():
             print(f"  {count} x {reason}")
-    print("Verdicts:", summary["verdicts"])
-    print("Confidence:", summary["confidence"])
+    print(f"Cases with at least one finding: {summary['cases_with_findings']}")
+    print("Findings:", summary["finding_counts"])
+    print("Gaps:", summary["gap_counts"])
     for key in (
         "steps",
         "tokens_in_per_run",

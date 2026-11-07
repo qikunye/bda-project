@@ -1,13 +1,5 @@
-"""Milestone 1 smoke test: run the four agent tools against real Athena (PLAN.md 18).
-
-Usage (needs an AWS login for the g1team5 account):
-    python -m scripts.smoke_agent_tools                 # the three standard cases
-    python -m scripts.smoke_agent_tools --show-json     # also print every tool output
-    python -m scripts.smoke_agent_tools --compare-bq2   # also check edges match the BQ2 query
-
-Checks: each case returns, no tool call scans more than the limit, repeats come from the cache,
-and no label column appears anywhere.
-"""
+"""Runs the agent's tools on three sample alerts against real Athena and checks the results,
+the data scanned, caching, and that no label column appears. Needs an AWS login."""
 
 import argparse
 import json
@@ -27,7 +19,7 @@ CASES = [
         "demo, 14 Sep, full window",
         "txn_a0f703e20da6f9bf0bdad4c0d62862de",
         "2022-09-14",
-        "reasons, graph",
+        "graph",
     ),
     (
         "16 Sep, truncated window",
@@ -39,7 +31,7 @@ CASES = [
         "15 Sep, outside top 1%",
         "txn_4c04b1aa63ea3c438f55f273d5cad546",
         "2022-09-15",
-        "no reasons",
+        "outside the top 1%",
     ),
 ]
 
@@ -127,6 +119,19 @@ def run_case(
     rows.append(("get_related_alerts 48h", stats))
     outputs.append(related)
 
+    for side in ("sender", "receiver"):
+        activity, stats = timed(
+            data, lambda side=side: tools.get_account_activity(data, alert, side, 48)
+        )
+        rows.append((f"get_account_activity {side}", stats))
+        outputs.append(activity)
+        print(
+            f"  activity {side}: in={activity['n_incoming']} "
+            f"({activity['n_incoming_counterparties']} accts) out={activity['n_outgoing']} "
+            f"({activity['n_outgoing_counterparties']} accts) history_days={activity['history_days']} "
+            f"capped={activity['edges_capped']}"
+        )
+
     if reference is not None:
         for window_h in (6, 48, 72):
             same, n_ours, n_bq2 = compare_with_bq2(data, reference, alert, window_h)
@@ -152,18 +157,19 @@ def run_case(
     scored = [n for n in neighbours["neighbours"] if n["scored"]]
     print(
         f"  alert: rank_day={alert['risk_rank_day']} rank_global={alert['risk_rank_global']} "
-        f"amount={alert['amount']} {alert['currency']} reasons={'yes' if alert['reasons'] else 'null'}"
+        f"amount={alert['amount']} {alert['currency']}"
     )
     print(
         f"  graph: up={graph['n_upstream']} ({graph['n_upstream_accounts']} accts) "
         f"down={graph['n_downstream']} ({graph['n_downstream_accounts']} accts) "
         f"truncated={graph['window_truncated']} capped={graph['edges_capped']} "
-        f"totals={graph['per_currency_totals']}"
+        f"totals={graph['per_currency_totals']}\n"
+        f"  flow: hours_observed={graph['hours_observed_after_alert']} "
+        f"returned_to_source={len(graph['returned_to_source'])} flow={graph['flow']}"
     )
     print(
         f"  neighbours: {len(scored)}/{len(neighbours['neighbours'])} scored, "
-        f"{sum(n['in_day_top_k'] for n in scored)} in top {config.AGENT_TOP_K}, "
-        f"{sum(n['has_reasons'] for n in scored)} with reasons; "
+        f"{sum(n['in_day_top_k'] for n in scored)} in top {config.AGENT_TOP_K}; "
         f"best rank_day={min((n['risk_rank_day'] for n in scored if n['risk_rank_day']), default=None)}"
     )
     print(f"  related alerts: {len(related['alerts'])}")

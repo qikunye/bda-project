@@ -1,34 +1,19 @@
-"""Checks the LLM's decision against what the tools returned in the same run. It rejects made-up IDs,
-raises with no payments behind them and numbers in the note, and sets caveats and confidence from the
-tool flags.
-"""
+"""Checks the LLM's brief against what the tools returned in the same run.
+It rejects unsupported findings, made-up IDs, disallowed next checks and numbers in the summary."""
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import get_args
+from dataclasses import dataclass
 
 from src import config
-from src.agent.claims import case_id_for
-from src.agent.contracts import (
-    Alert,
-    CaseGraph,
-    Claim,
-    ClaimCode,
-    Confidence,
-    Decision,
-    NeighbourScore,
-    RelatedAlerts,
-    Verdict,
-)
+from src.agent import brief as brief_rules
+from src.agent import findings as finding_rules
+from src.agent.contracts import Brief, Finding
+from src.agent.evidence import RunEvidence
 
-VERDICTS = frozenset(get_args(Verdict))
-CONFIDENCES = frozenset(get_args(Confidence))
-CLAIM_CODES = frozenset(get_args(ClaimCode))
-DECISION_FIELDS = frozenset(
-    {"verdict", "confidence", "claims", "note"}
-)
-MAX_EVIDENCE_IDS_PER_CLAIM = 50
+FINDING_CODES = frozenset(finding_rules.FINDING_CODES)
+NEXT_CHECK_CODES = frozenset(brief_rules.NEXT_CHECK_CODES)
+BRIEF_FIELDS = frozenset({"findings", "next_checks", "summary"})
 # "one" is left out because it is also an ordinary word, as in "one of the accounts".
 _NUMBER_WORD = re.compile(
     r"\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
@@ -38,324 +23,145 @@ _NUMBER_WORD = re.compile(
 )
 
 
-@dataclass
-class RunEvidence:
-    """Everything the model has been shown in one run, used to check its decision."""
-
-    representative: str
-    members: tuple[str, ...]
-    top_k: int = config.AGENT_TOP_K
-    # Each ID a tool result listed (transactions and accounts).
-    known_ids: set[str] = field(default_factory=set)
-    # Transaction ID -> date, for those the tools can be asked about. Starts with the members.
-    txn_dates: dict[str, str] = field(default_factory=dict)
-    alerts: dict[str, Alert] = field(default_factory=dict)
-    graphs: dict[str, CaseGraph] = field(default_factory=dict)
-    neighbours: dict[str, NeighbourScore] = field(default_factory=dict)
-    # One entry per get_related_alerts call. The model may call it for several case members.
-    related_calls: list[RelatedAlerts] = field(default_factory=list)
-
-    def record(self, tool: str, result: Mapping) -> None:
-        """Stores one tool result that the model was shown."""
-
-        self.known_ids.update(result.get("ids", ()))
-        if tool == "get_alert" and result.get("found"):
-            self.alerts[result["txn_id"]] = result
-            self.txn_dates[result["txn_id"]] = result["txn_date"]
-        elif tool == "get_case_graph":
-            self.graphs[result["txn_id"]] = result
-            for edge in result["upstream"] + result["downstream"]:
-                self.txn_dates[edge["txn_id"]] = edge["txn_date"]
-        elif tool == "get_neighbour_scores":
-            for neighbour in result["neighbours"]:
-                self.neighbours[neighbour["txn_id"]] = neighbour
-        elif tool == "get_related_alerts":
-            self.related_calls.append(result)
-            for alert in result["alerts"]:
-                self.txn_dates[alert["txn_id"]] = alert["txn_date"]
-
-    @property
-    def related(self) -> RelatedAlerts | None:
-        """All related alerts the model has seen, merged across calls. None if never called."""
-
-        if not self.related_calls:
-            return None
-        merged = {
-            (alert["txn_id"], alert["account"]): alert
-            for call in self.related_calls
-            for alert in call["alerts"]
-        }
-        alerts = sorted(
-            merged.values(),
-            key=lambda a: (a["risk_rank_day"], a["txn_id"], a["account"]),
-        )
-        return RelatedAlerts(
-            alerts=alerts,
-            top_k=self.related_calls[0]["top_k"],
-            window_h=max(call["window_h"] for call in self.related_calls),
-            ids=list(
-                dict.fromkeys(i for call in self.related_calls for i in call["ids"])
-            ),
-        )
-
-    @property
-    def edge_txn_ids(self) -> set[str]:
-        return {
-            edge["txn_id"]
-            for graph in self.graphs.values()
-            for edge in graph["upstream"] + graph["downstream"]
-        }
-
-    # Tool flags. Each is False until the tool that sets it has run.
-
-    @property
-    def no_graph(self) -> bool:
-        """True if the representative's graph was fetched and has no payments."""
-
-        graph = self.graphs.get(self.representative)
-        return graph is not None and graph["no_graph"]
-
-    @property
-    def truncated(self) -> bool:
-        return any(graph["window_truncated"] for graph in self.graphs.values())
-
-    @property
-    def no_reasons(self) -> bool:
-        alert = self.alerts.get(self.representative)
-        return alert is not None and alert["reasons"] is None
-
-    @property
-    def has_reasons(self) -> bool:
-        alert = self.alerts.get(self.representative)
-        return alert is not None and alert["reasons"] is not None
-
-
 @dataclass(frozen=True)
 class Validated:
-    decision: Decision | None
+    brief: Brief | None
     errors: tuple[str, ...] = ()
-    # What code changed on an accepted decision, e.g. "added TRUNCATED_WINDOW".
-    adjustments: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
-        return self.decision is not None
+        return self.brief is not None
 
 
-def _string_list(value, name: str, errors: list[str]) -> list[str]:
-    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-        errors.append(f"{name} must be a list of ID strings.")
-        return []
-    return value
+def _parse_shape(payload) -> tuple[Brief | None, list[str]]:
+    """Checks the brief has the right fields and allowed values."""
 
-
-def _parse_shape(payload) -> tuple[dict | None, list[str]]:
-    """Checks the decision has the right fields and allowed values."""
-
-    errors: list[str] = []
     if not isinstance(payload, Mapping):
-        return None, ["The decision must be a JSON object."]
+        return None, ["The brief must be a JSON object."]
+    errors: list[str] = []
 
-    unknown = sorted(set(payload) - DECISION_FIELDS)
+    unknown = sorted(set(payload) - BRIEF_FIELDS)
     if unknown:
         hint = (
-            " case_id is set by code, so leave it out." if "case_id" in unknown else ""
+            " case_id, gaps and money_flow are set by code, so leave them out."
+            if {"case_id", "gaps", "money_flow"} & set(unknown)
+            else ""
         )
         errors.append(f"Unknown field(s): {unknown}.{hint}")
 
-    verdict, confidence = payload.get("verdict"), payload.get("confidence")
-    if verdict not in VERDICTS:
-        errors.append(f"verdict must be one of {sorted(VERDICTS)}, got {verdict!r}.")
-    if confidence not in CONFIDENCES:
-        errors.append(
-            f"confidence must be one of {sorted(CONFIDENCES)}, got {confidence!r}."
-        )
-
-    claims: list[Claim] = []
-    raw_claims = payload.get("claims")
-    if not isinstance(raw_claims, list):
-        errors.append("claims must be a list of {code, evidence_ids}.")
-        raw_claims = []
-    seen_codes: set[str] = set()
-    for raw in raw_claims:
+    findings: list[Finding] = []
+    raw_findings = payload.get("findings")
+    if not isinstance(raw_findings, list):
+        errors.append("findings must be a list of {code, evidence_ids}. Use [] for none.")
+        raw_findings = []
+    seen: set[str] = set()
+    for raw in raw_findings:
         if not isinstance(raw, Mapping) or set(raw) != {"code", "evidence_ids"}:
             errors.append(
-                "Each claim must have exactly the fields code and evidence_ids."
+                "Each finding must have exactly the fields code and evidence_ids."
             )
             continue
         code = raw["code"]
-        if code not in CLAIM_CODES:
-            errors.append(f"Unknown claim code {code!r}. Valid: {sorted(CLAIM_CODES)}.")
-            continue
-        if code in seen_codes:
-            errors.append(f"Claim {code} appears twice. List each code once.")
-            continue
-        seen_codes.add(code)
-        ids = _string_list(raw["evidence_ids"], f"{code} evidence_ids", errors)
-        if not ids:
-            errors.append(f"Claim {code} needs at least one evidence ID.")
-        elif len(ids) > MAX_EVIDENCE_IDS_PER_CLAIM:
+        if code not in FINDING_CODES:
             errors.append(
-                f"Claim {code} cites {len(ids)} IDs. The limit is {MAX_EVIDENCE_IDS_PER_CLAIM}."
+                f"Unknown finding code {code!r}. Valid: {sorted(FINDING_CODES)}."
             )
-        claims.append(Claim(code=code, evidence_ids=list(dict.fromkeys(ids))))
+            continue
+        if code in seen:
+            errors.append(f"Finding {code} appears twice. List each code once.")
+            continue
+        seen.add(code)
+        ids = raw["evidence_ids"]
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            errors.append(f"{code} evidence_ids must be a list of ID strings.")
+        elif not ids:
+            errors.append(f"Finding {code} needs at least one evidence ID.")
+        elif len(ids) > config.AGENT_MAX_EVIDENCE_IDS:
+            errors.append(
+                f"Finding {code} cites {len(ids)} IDs. The limit is {config.AGENT_MAX_EVIDENCE_IDS}."
+            )
+        else:
+            findings.append(Finding(code=code, evidence_ids=list(dict.fromkeys(ids))))
 
-    note = payload.get("note")
-    if note is not None and not isinstance(note, str):
-        errors.append("note must be a string or null.")
-        note = None
-    note = (note or "").strip() or None
+    next_checks: list[str] = []
+    raw_checks = payload.get("next_checks")
+    if not isinstance(raw_checks, list):
+        errors.append("next_checks must be a list of codes. Use [] for none.")
+        raw_checks = []
+    for code in raw_checks:
+        if code not in NEXT_CHECK_CODES:
+            errors.append(
+                f"Unknown next check {code!r}. Valid: {sorted(NEXT_CHECK_CODES)}."
+            )
+        elif code not in next_checks:
+            next_checks.append(code)
+
+    summary = payload.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        errors.append("summary must be a short sentence.")
+        summary = ""
 
     if errors:
         return None, errors
     return (
-        {
-            "verdict": verdict,
-            "confidence": confidence,
-            "claims": claims,
-            "note": note,
-        },
+        Brief(findings=findings, next_checks=next_checks, summary=summary.strip()),
         [],
     )
 
 
-def _grounding_error(claim: Claim, evidence: RunEvidence) -> str | None:
-    """Returns an error if a claim isn't backed by the tool results, otherwise None."""
-
-    code, ids = claim["code"], set(claim["evidence_ids"])
-    if code == "NEIGHBOURS_HIGH_RISK":
-        high = {t for t, n in evidence.neighbours.items() if n["in_day_top_k"]}
-        if not ids <= high:
-            return (
-                f"NEIGHBOURS_HIGH_RISK must cite only neighbours that get_neighbour_scores "
-                f"shows inside the day's top {evidence.top_k}. Not so: {sorted(ids - high)[:5]}."
-            )
-    elif code == "FAST_CHAIN":
-        if not ids <= evidence.edge_txn_ids:
-            return (
-                "FAST_CHAIN must cite only payments listed by get_case_graph. "
-                f"Not so: {sorted(ids - evidence.edge_txn_ids)[:5]}."
-            )
-    elif code == "REPEAT_ACCOUNT_ALERTS":
-        related = (
-            {a["txn_id"] for a in evidence.related["alerts"]}
-            if evidence.related
-            else set()
+def _summary_errors(summary: str) -> list[str]:
+    errors: list[str] = []
+    if len(summary) > config.AGENT_SUMMARY_MAX_CHARS:
+        errors.append(
+            f"summary is {len(summary)} characters. The limit is {config.AGENT_SUMMARY_MAX_CHARS}."
         )
-        if not ids <= related:
-            return (
-                "REPEAT_ACCOUNT_ALERTS must cite only alerts returned by get_related_alerts. "
-                f"Not so: {sorted(ids - related)[:5]}."
-            )
-    elif code in ("REASONS_CORROBORATED", "REASONS_NOT_SUPPORTED"):
-        if not evidence.has_reasons:
-            return f"{code} needs the representative alert to have model reasons."
-        if not evidence.graphs:
-            return f"{code} needs a get_case_graph result first."
-        if code == "REASONS_CORROBORATED" and all(
-            g["no_graph"] for g in evidence.graphs.values()
-        ):
-            return (
-                "REASONS_CORROBORATED cannot be claimed when the graph has no payments."
-            )
-    return None
+    if any(character.isdigit() for character in summary):
+        errors.append("summary must not contain digits. Remove them.")
+    spelled = _NUMBER_WORD.search(summary)
+    if spelled:
+        errors.append(
+            f"summary must not spell out numbers, but it says {spelled.group()!r}. Remove it."
+        )
+    return errors
 
 
-def validate_decision(payload, evidence: RunEvidence) -> Validated:
+def validate_brief(payload, evidence: RunEvidence) -> Validated:
     fields, errors = _parse_shape(payload)
     if fields is None:
         return Validated(None, tuple(errors))
 
-    verdict, confidence = fields["verdict"], fields["confidence"]
-    claims: list[Claim] = fields["claims"]
-    note: str | None = fields["note"]
-    codes = {c["code"] for c in claims}
-
     # 2. Every cited ID came from a tool result in this run.
-    for claim in claims:
-        unseen = [i for i in claim["evidence_ids"] if i not in evidence.known_ids]
+    for finding in fields["findings"]:
+        unseen = [i for i in finding["evidence_ids"] if i not in evidence.known_ids]
         if unseen:
             errors.append(
-                f"Claim {claim['code']} cites IDs no tool returned in this run: {unseen[:5]}."
+                f"Finding {finding['code']} cites IDs no tool returned in this run: {unseen[:5]}."
             )
-    # 3. No payments to check is not evidence that an alert is harmless.
-    if (
-        verdict == "dont_raise"
-        and evidence.graphs
-        and all(graph["no_graph"] for graph in evidence.graphs.values())
-    ):
-        errors.append(
-            "dont_raise needs payments that fail to support the reasons, but the graphs fetched "
-            "have none. Use not_sure, or fetch another case member's graph."
-        )
-    # Also covers a raise with no graph fetched at all, so skipping the graph can't get around it.
-    if verdict == "raise" and all(
-        graph["no_graph"] for graph in evidence.graphs.values()
-    ):
-        errors.append(
-            "raise needs a graph with payments, but no graph fetched in this run has any. "
-            "Use not_sure."
-        )
 
-    for claim in claims:
-        problem = _grounding_error(claim, evidence)
+    # 3. Each finding meets its rule, using this run's tool results.
+    instances = finding_rules.detect(evidence)
+    for finding in fields["findings"]:
+        problem = finding_rules.check_finding(
+            finding["code"], set(finding["evidence_ids"]), instances
+        )
         if problem:
             errors.append(problem)
-    if {"REASONS_CORROBORATED", "REASONS_NOT_SUPPORTED"} <= codes:
-        errors.append(
-            "REASONS_CORROBORATED and REASONS_NOT_SUPPORTED contradict each other."
-        )
 
-    # 4. The note is short and has no numbers, so every displayed number comes from the claims.
-    if note is not None:
-        if len(note) > config.AGENT_NOTE_MAX_CHARS:
+    # 4. Each next check is allowed by a finding it submitted or a gap code sets.
+    gap_codes = {gap["code"] for gap in brief_rules.compute_gaps(evidence)}
+    finding_codes = {f["code"] for f in fields["findings"]}
+    allowed = set(brief_rules.allowed_next_checks(finding_codes, gap_codes))
+    for check in fields["next_checks"]:
+        if check not in allowed:
+            needs = sorted(brief_rules.NEXT_CHECK_NEEDS[check])
             errors.append(
-                f"note is {len(note)} characters. The limit is {config.AGENT_NOTE_MAX_CHARS}."
-            )
-        if any(character.isdigit() for character in note):
-            errors.append(
-                "note must not contain digits. Remove them, or leave the note out."
-            )
-        spelled = _NUMBER_WORD.search(note)
-        if spelled:
-            errors.append(
-                f"note must not spell out numbers, but it says {spelled.group()!r}. "
-                "Remove it, or leave the note out."
+                f"{check} needs one of {needs} among the findings or gaps. Leave it out, "
+                "or add the finding it follows from."
             )
 
-    # 5. Caveat claims match the tool flags.
-    flags: dict[str, bool] = {
-        "NO_GRAPH_AVAILABLE": evidence.no_graph,
-        "TRUNCATED_WINDOW": evidence.truncated,
-        "NO_REASONS_AVAILABLE": evidence.no_reasons,
-    }
-    for code, flag in flags.items():
-        if code in codes and not flag:
-            errors.append(f"{code} was claimed, but the tool flags do not show it.")
+    # 5. The summary is short and has no numbers, so every displayed number comes from code.
+    errors.extend(_summary_errors(fields["summary"]))
 
     if errors:
         return Validated(None, tuple(errors))
-
-    adjustments: list[str] = []
-    for code, flag in flags.items():
-        if flag and code not in codes:
-            claims.append(Claim(code=code, evidence_ids=[evidence.representative]))
-            adjustments.append(f"added {code}")
-    if evidence.no_graph and confidence != "low":
-        confidence = "low"
-        adjustments.append("confidence lowered to low")
-    elif evidence.truncated and confidence == "high":
-        # A daily run is nearly always truncated, so this caps confidence instead of erasing it.
-        confidence = "medium"
-        adjustments.append("confidence lowered to medium")
-
-    decision = Decision(
-        verdict=verdict,
-        confidence=confidence,
-        case_id=case_id_for(evidence.representative)
-        if len(evidence.members) > 1
-        else None,
-        claims=claims,
-        note=note,
-    )
-    return Validated(decision, (), tuple(adjustments))
+    return Validated(fields)

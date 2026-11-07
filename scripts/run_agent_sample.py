@@ -1,6 +1,5 @@
-"""Runs the LLM agent on the first few cases of a day and reports valid, repair and fallback rates and tokens.
-Needs an AWS login and spends money on Athena and Bedrock. Example: python -m scripts.run_agent_sample --day 2022-09-14 --limit 20 --out sample.json
-"""
+"""Runs the LLM agent on the first few cases of a day and reports outcome rates and tokens.
+Needs an AWS login and spends money on Athena and Bedrock."""
 
 import argparse
 import json
@@ -63,7 +62,7 @@ def main() -> int:
         stats = result["stats"]
         print(
             f"[{index}/{len(cases)}] {case.case_id}: "
-            f"{result['decision']['verdict'] if result['decision'] else result['status']} "
+            f"{str(len(result['findings'])) + ' findings' if result['status'] == 'ok' else result['status']} "
             f"{stats['validation'] if stats else ''} "
             f"steps={stats['steps'] if stats else '-'} "
             f"tokens={stats['tokens_in'] + stats['tokens_out'] if stats else '-'} "

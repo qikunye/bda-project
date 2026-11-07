@@ -1,9 +1,8 @@
 import pytest
 
 from src import config
-from src.agent.validate import RunEvidence, validate_decision
+from src.agent.validate import validate_brief
 from tests.unit.agent_loop_fixtures import (
-    alert_result,
     graph_result,
     make_evidence,
     related_result,
@@ -12,331 +11,251 @@ from tests.unit.agent_loop_fixtures import (
 
 
 def errors_of(payload, evidence=None):
-    result = validate_decision(payload, evidence or make_evidence())
-    assert not result.ok
-    return " ".join(result.errors)
+    return validate_brief(payload, evidence or make_evidence()).errors
 
 
-def test_a_grounded_decision_is_accepted_and_code_sets_the_case_id():
-    result = validate_decision(valid_payload(), make_evidence(("txn_a", "txn_b")))
-    assert result.ok
-    assert result.decision["case_id"] == "case_txn_a"
-    assert result.decision["note"] is None
+def check(payload, evidence=None):
+    validated = validate_brief(payload, evidence or make_evidence())
+    assert validated.errors == ()
+    assert validated.ok
+    return validated.brief
 
 
-def test_a_single_alert_has_no_case_id():
-    payload = valid_payload(verdict="raise")
-    result = validate_decision(payload, make_evidence())
-    assert result.decision["case_id"] is None
+def rejected(payload, evidence=None, *, mentioning=""):
+    errors = errors_of(payload, evidence)
+    assert errors, "The brief should have been rejected."
+    assert mentioning in " ".join(errors)
+
+
+# --- A valid brief
+
+
+def test_a_supported_brief_is_accepted_as_submitted():
+    brief = check(valid_payload())
+    assert [f["code"] for f in brief["findings"]] == ["PASS_THROUGH", "NEIGHBOURS_HIGH_RISK"]
+    assert brief["next_checks"] == ["CHECK_ONWARD_ACCOUNTS"]
+    assert brief["summary"] == "Money came in and went on quickly."
+
+
+def test_an_empty_brief_is_valid():
+    brief = check(valid_payload(findings=[], next_checks=[]))
+    assert brief["findings"] == [] and brief["next_checks"] == []
+
+
+def test_repeated_ids_and_checks_are_dropped_and_the_summary_trimmed():
+    brief = check(
+        valid_payload(
+            findings=[{"code": "PASS_THROUGH", "evidence_ids": ["txn_high", "txn_up", "txn_up"]}],
+            next_checks=["CHECK_ONWARD_ACCOUNTS", "CHECK_ONWARD_ACCOUNTS"],
+            summary="  Money moved on.  ",
+        )
+    )
+    assert brief["findings"][0]["evidence_ids"] == ["txn_high", "txn_up"]
+    assert brief["next_checks"] == ["CHECK_ONWARD_ACCOUNTS"]
+    assert brief["summary"] == "Money moved on."
 
 
 # --- Shape
 
 
-@pytest.mark.parametrize("payload", [None, [], "raise", 3])
-def test_a_decision_must_be_an_object(payload):
-    assert "JSON object" in errors_of(payload)
+@pytest.mark.parametrize("payload", [None, [], "brief", 3])
+def test_the_brief_must_be_an_object(payload):
+    rejected(payload, mentioning="JSON object")
 
 
-def test_unknown_fields_are_rejected_and_case_id_is_explained():
-    message = errors_of(valid_payload(case_id="case_x", reason="because"))
-    assert "case_id" in message and "set by code" in message
+def test_unknown_fields_are_rejected_and_code_owned_ones_are_explained():
+    rejected(valid_payload(color="red"), mentioning="Unknown field")
+    rejected(valid_payload(gaps=[]), mentioning="set by code")
+    rejected(valid_payload(money_flow=[]), mentioning="set by code")
+    rejected(valid_payload(case_id="case_txn_a"), mentioning="set by code")
+    rejected(valid_payload(verdict="raise"), mentioning="Unknown field")
 
 
-@pytest.mark.parametrize(
-    "overrides, fragment",
-    [
-        ({"verdict": "arrest"}, "verdict must be one of"),
-        ({"verdict": None}, "verdict must be one of"),
-        ({"confidence": "certain"}, "confidence must be one of"),
-        ({"claims": "FAST_CHAIN"}, "claims must be a list"),
-        (
-            {"claims": [{"code": "MADE_UP", "evidence_ids": ["txn_low"]}]},
-            "Unknown claim code",
-        ),
-        ({"claims": [{"code": "FAST_CHAIN"}]}, "exactly the fields"),
-        (
-            {"claims": [{"code": "FAST_CHAIN", "evidence_ids": []}]},
-            "at least one evidence ID",
-        ),
-        (
-            {"claims": [{"code": "FAST_CHAIN", "evidence_ids": "txn_low"}]},
-            "list of ID strings",
-        ),
-        ({"note": 5}, "note must be a string"),
-    ],
-)
-def test_malformed_fields_are_rejected(overrides, fragment):
-    assert fragment in errors_of(valid_payload(**overrides))
+@pytest.mark.parametrize("missing", ["findings", "next_checks", "summary"])
+def test_every_field_is_required(missing):
+    payload = valid_payload()
+    del payload[missing]
+    rejected(payload, mentioning=missing)
 
 
-def test_a_claim_code_may_appear_once():
-    claims = [
-        {"code": "FAST_CHAIN", "evidence_ids": ["txn_low"]},
-        {"code": "FAST_CHAIN", "evidence_ids": ["txn_high"]},
-    ]
-    assert "appears twice" in errors_of(valid_payload(claims=claims))
-
-
-def test_all_errors_are_reported_together():
-    result = validate_decision(
-        valid_payload(verdict="arrest", confidence="certain"), make_evidence()
+def test_findings_must_be_well_formed():
+    rejected(valid_payload(findings="PASS_THROUGH"), mentioning="list of")
+    rejected(valid_payload(findings=["PASS_THROUGH"]), mentioning="exactly the fields")
+    rejected(
+        valid_payload(findings=[{"code": "PASS_THROUGH", "evidence_ids": ["txn_up"], "x": 1}]),
+        mentioning="exactly the fields",
     )
-    assert len(result.errors) == 2
-
-
-# --- Check 2: cited IDs come from this run
-
-
-def test_a_claim_citing_an_id_no_tool_returned_is_rejected():
-    claims = [{"code": "FAST_CHAIN", "evidence_ids": ["txn_invented"]}]
-    assert "txn_invented" in errors_of(valid_payload(claims=claims))
-
-
-def test_an_account_from_a_result_may_be_cited():
-    claims = [{"code": "REASONS_CORROBORATED", "evidence_ids": ["2|B"]}]
-    payload = valid_payload(verdict="raise", claims=claims)
-    assert validate_decision(payload, make_evidence()).ok
-
-
-# --- Check 3: no payments is not evidence
-
-
-def test_promoted_ids_are_no_longer_accepted():
-    payload = valid_payload(promoted_txn_ids=["txn_low"])
-    assert "Unknown field(s): ['promoted_txn_ids']" in errors_of(payload)
-
-
-def test_dont_raise_is_rejected_when_no_graph_has_payments():
-    evidence = make_evidence(downstream=(), ranks={})
-    payload = valid_payload(verdict="dont_raise", claims=[])
-    assert "Use not_sure" in errors_of(payload, evidence)
-
-
-def test_dont_raise_is_accepted_when_a_graph_has_payments():
-    claims = [{"code": "REASONS_NOT_SUPPORTED", "evidence_ids": ["txn_a"]}]
-    payload = valid_payload(verdict="dont_raise", claims=claims)
-    assert validate_decision(payload, make_evidence()).ok
-
-
-def test_raise_is_rejected_when_no_graph_has_payments():
-    evidence = make_evidence(downstream=(), ranks={})
-    payload = valid_payload(verdict="raise", claims=[])
-    assert "raise needs a graph with payments" in errors_of(payload, evidence)
-
-
-def test_raise_is_rejected_when_no_graph_was_fetched():
-    evidence = RunEvidence(representative="txn_a", members=("txn_a",))
-    evidence.record("get_alert", alert_result("txn_a"))
-    payload = valid_payload(verdict="raise", claims=[])
-    assert "raise needs a graph with payments" in errors_of(payload, evidence)
-
-
-def test_raise_is_accepted_when_another_members_graph_has_payments():
-    evidence = make_evidence(("txn_a", "txn_b"), downstream=(), ranks={})
-    evidence.record("get_case_graph", graph_result("txn_b", ("txn_low",)))
-    result = validate_decision(valid_payload(verdict="raise", claims=[]), evidence)
-    assert result.ok
-    # The representative's own graph is still empty, so the caveat and low confidence stay.
-    assert [c["code"] for c in result.decision["claims"]] == ["NO_GRAPH_AVAILABLE"]
-    assert result.decision["confidence"] == "low"
-
-
-def test_not_sure_is_accepted_when_no_graph_has_payments():
-    evidence = make_evidence(downstream=(), ranks={})
-    assert validate_decision(valid_payload(verdict="not_sure", claims=[]), evidence).ok
-
-
-def test_the_old_verdict_names_are_rejected():
-    for old in ("escalate", "merge_into_case", "promote", "deprioritise", "need_more"):
-        assert "verdict must be one of" in errors_of(valid_payload(verdict=old))
-
-
-# --- Claim grounding
-
-
-def test_neighbours_high_risk_must_cite_top_k_neighbours():
-    claims = [{"code": "NEIGHBOURS_HIGH_RISK", "evidence_ids": ["txn_low"]}]
-    assert "NEIGHBOURS_HIGH_RISK" in errors_of(valid_payload(claims=claims))
-
-
-def test_neighbours_high_risk_without_neighbour_scores_is_rejected():
-    evidence = make_evidence(ranks={})
-    claims = [{"code": "NEIGHBOURS_HIGH_RISK", "evidence_ids": ["txn_high"]}]
-    payload = valid_payload(verdict="raise", claims=claims)
-    assert "NEIGHBOURS_HIGH_RISK" in errors_of(payload, evidence)
-
-
-def test_fast_chain_must_cite_graph_payments():
-    claims = [{"code": "FAST_CHAIN", "evidence_ids": ["txn_a"]}]
-    assert "FAST_CHAIN" in errors_of(valid_payload(claims=claims))
-
-
-def test_repeat_account_alerts_must_cite_related_alerts():
-    claims = [{"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_b"]}]
-    payload = valid_payload(verdict="raise", claims=claims)
-    assert "REPEAT_ACCOUNT_ALERTS" in errors_of(payload)
-    evidence = make_evidence(("txn_a", "txn_b"), related=related_result("txn_b"))
-    assert validate_decision(payload, evidence).ok
-
-
-def test_reasons_claims_need_reasons_and_a_graph():
-    claims = [{"code": "REASONS_CORROBORATED", "evidence_ids": ["txn_a"]}]
-    payload = valid_payload(verdict="raise", claims=claims)
-    assert "needs the representative alert to have model reasons" in errors_of(
-        payload, make_evidence(reasons=False)
+    rejected(
+        valid_payload(findings=[{"code": "FAST_CHAIN", "evidence_ids": ["txn_up"]}]),
+        mentioning="Unknown finding code",
     )
-    assert "no payments" in errors_of(payload, make_evidence(downstream=(), ranks={}))
-
-
-def test_corroborated_and_not_supported_contradict():
-    claims = [
-        {"code": "REASONS_CORROBORATED", "evidence_ids": ["txn_a"]},
-        {"code": "REASONS_NOT_SUPPORTED", "evidence_ids": ["txn_a"]},
-    ]
-    payload = valid_payload(verdict="raise", claims=claims)
-    assert "contradict" in errors_of(payload)
-
-
-# --- Check 4: the note
-
-
-def test_a_long_note_is_rejected():
-    assert "limit" in errors_of(
-        valid_payload(note="x" * (config.AGENT_NOTE_MAX_CHARS + 1))
+    rejected(
+        valid_payload(findings=[{"code": "PASS_THROUGH", "evidence_ids": []}]),
+        mentioning="at least one evidence ID",
+    )
+    rejected(
+        valid_payload(findings=[{"code": "PASS_THROUGH", "evidence_ids": "txn_up"}]),
+        mentioning="list of ID strings",
+    )
+    rejected(
+        valid_payload(findings=[{"code": "PASS_THROUGH", "evidence_ids": [1]}]),
+        mentioning="list of ID strings",
     )
 
 
-def test_a_note_at_the_limit_is_accepted():
-    assert validate_decision(
-        valid_payload(note="x" * config.AGENT_NOTE_MAX_CHARS), make_evidence()
-    ).ok
+def test_a_finding_code_may_appear_once():
+    finding = {"code": "PASS_THROUGH", "evidence_ids": ["txn_high", "txn_up"]}
+    rejected(valid_payload(findings=[finding, finding]), mentioning="appears twice")
 
 
-def test_a_blank_note_becomes_null():
-    assert (
-        validate_decision(valid_payload(note="  "), make_evidence()).decision["note"]
-        is None
+def test_a_finding_may_cite_only_so_many_ids():
+    ids = [f"txn_{n}" for n in range(config.AGENT_MAX_EVIDENCE_IDS + 1)]
+    rejected(
+        valid_payload(findings=[{"code": "NEIGHBOURS_HIGH_RISK", "evidence_ids": ids}]),
+        mentioning="The limit is",
     )
 
 
-@pytest.mark.parametrize(
-    "note",
-    ["Gap of 15 minutes.", "57% of the alert amount.", "Paid at 10:57.", "txn_a0f7 again."],
-)
-def test_a_note_with_digits_is_rejected(note):
-    assert "must not contain digits" in errors_of(valid_payload(note=note))
+def test_next_checks_must_be_known_codes():
+    rejected(valid_payload(next_checks="CHECK_ONWARD_ACCOUNTS"), mentioning="list of codes")
+    rejected(valid_payload(next_checks=["CALL_THE_POLICE"]), mentioning="Unknown next check")
 
 
-def test_a_note_without_digits_is_accepted():
-    assert validate_decision(valid_payload(note="Chain looks fast."), make_evidence()).ok
+@pytest.mark.parametrize("summary", [None, "", "   ", 5])
+def test_the_summary_must_be_a_sentence(summary):
+    rejected(valid_payload(summary=summary), mentioning="summary")
 
 
-@pytest.mark.parametrize(
-    "note",
-    ["Same sender in four top alerts.", "Two alerts form a chain.", "Fifteen payments.", "Within three hours."],
-)
-def test_a_note_with_a_spelled_out_number_is_rejected(note):
-    assert "must not spell out numbers" in errors_of(valid_payload(note=note))
+# --- IDs and rules
 
 
-@pytest.mark.parametrize(
-    "note",
-    [
-        "One of the accounts repeats.",
-        "Multiple payments, often within hours.",
-        "Someone's network looks tense and often stone-like.",
-        "A canteen payment.",
-    ],
-)
-def test_ordinary_words_are_not_mistaken_for_numbers(note):
-    assert validate_decision(valid_payload(note=note), make_evidence()).ok
-
-
-# --- Check 5: caveat claims match the flags
-
-
-def test_a_false_caveat_claim_is_rejected():
-    for code in ("NO_GRAPH_AVAILABLE", "TRUNCATED_WINDOW", "NO_REASONS_AVAILABLE"):
-        claims = valid_payload()["claims"] + [{"code": code, "evidence_ids": ["txn_a"]}]
-        assert code in errors_of(valid_payload(claims=claims))
-
-
-def test_a_true_caveat_claim_is_accepted_once():
-    evidence = make_evidence(truncated=True)
-    claims = valid_payload()["claims"] + [
-        {"code": "TRUNCATED_WINDOW", "evidence_ids": ["txn_a"]}
-    ]
-    result = validate_decision(valid_payload(claims=claims), evidence)
-    assert [c["code"] for c in result.decision["claims"]].count("TRUNCATED_WINDOW") == 1
-
-
-def test_missing_caveat_claims_are_added_from_the_flags():
-    evidence = make_evidence(truncated=True, reasons=False)
-    result = validate_decision(valid_payload(), evidence)
-    codes = [c["code"] for c in result.decision["claims"]]
-    assert "TRUNCATED_WINDOW" in codes and "NO_REASONS_AVAILABLE" in codes
-    assert result.decision["claims"][-1]["evidence_ids"] == ["txn_a"]
-    assert set(result.adjustments) >= {
-        "added TRUNCATED_WINDOW",
-        "added NO_REASONS_AVAILABLE",
-    }
-
-
-def test_no_graph_adds_its_claim():
-    evidence = make_evidence(downstream=(), ranks={})
-    payload = valid_payload(verdict="not_sure", claims=[])
-    # claims may be empty in shape; the code adds the flag claim.
-    result = validate_decision(payload, evidence)
-    assert [c["code"] for c in result.decision["claims"]] == ["NO_GRAPH_AVAILABLE"]
-
-
-def test_truncation_caps_confidence_at_medium():
-    truncated = validate_decision(
-        valid_payload(confidence="high"), make_evidence(truncated=True)
+def test_ids_no_tool_returned_are_rejected():
+    rejected(
+        valid_payload(findings=[{"code": "NEIGHBOURS_HIGH_RISK", "evidence_ids": ["txn_invented"]}]),
+        mentioning="no tool returned",
     )
-    assert truncated.decision["confidence"] == "medium"
-    assert "confidence lowered to medium" in truncated.adjustments
 
-    low = validate_decision(
-        valid_payload(confidence="low"), make_evidence(truncated=True)
+
+def test_a_finding_the_rules_do_not_find_is_rejected_with_what_it_needs():
+    payload = valid_payload(
+        findings=[{"code": "FAN_OUT", "evidence_ids": ["txn_high"]}],
+        next_checks=[],
     )
-    assert low.decision["confidence"] == "low"
+    rejected(payload, mentioning="side=sender")
 
 
-def test_no_graph_lowers_confidence_to_low():
-    no_graph = validate_decision(
+def test_a_finding_needs_its_core_evidence():
+    payload = valid_payload(
+        findings=[{"code": "PASS_THROUGH", "evidence_ids": ["txn_low"]}], next_checks=[]
+    )
+    rejected(payload, mentioning="missing required evidence")
+
+
+def test_a_finding_cannot_cite_ids_outside_what_the_rule_found():
+    payload = valid_payload(
+        findings=[{"code": "NEIGHBOURS_HIGH_RISK", "evidence_ids": ["txn_low"]}],  # Rank 900.
+        next_checks=[],
+    )
+    rejected(payload, mentioning="txn_low")
+
+
+def test_a_finding_is_judged_on_this_runs_tool_results_only():
+    evidence = make_evidence(ranks={})  # The model never fetched neighbour scores.
+    rejected(
         valid_payload(
-            verdict="not_sure", confidence="medium", claims=[]
+            findings=[{"code": "NEIGHBOURS_HIGH_RISK", "evidence_ids": ["txn_high"]}],
+            next_checks=[],
         ),
-        make_evidence(downstream=(), ranks={}),
+        evidence,
+        mentioning="not supported by the tool results",
     )
-    assert no_graph.decision["confidence"] == "low"
 
 
-def test_confidence_is_kept_when_nothing_limits_it():
-    result = validate_decision(valid_payload(confidence="high"), make_evidence())
-    assert result.decision["confidence"] == "high"
-    assert result.adjustments == ()
+def test_money_returns_needs_both_payments():
+    evidence = make_evidence(ranks={})
+    evidence.record("get_case_graph", graph_result("txn_a", returned_to="9|SRC"))
+    both = [{"code": "MONEY_RETURNS", "evidence_ids": ["txn_high", "txn_up"]}]
+    one = [{"code": "MONEY_RETURNS", "evidence_ids": ["txn_high"]}]
+    check(valid_payload(findings=both, next_checks=["CHECK_RETURN_FLOW"]), evidence)
+    rejected(valid_payload(findings=one, next_checks=[]), evidence, mentioning="missing required")
 
 
-def test_no_caveat_is_added_for_a_graph_that_was_never_fetched():
-    evidence = make_evidence()
-    evidence.graphs.clear()
-    claims = [{"code": "REASONS_NOT_SUPPORTED", "evidence_ids": ["txn_a"]}]
-    payload = valid_payload(verdict="dont_raise", claims=claims)
-    assert "get_case_graph" in errors_of(payload, evidence)
+def test_fan_out_needs_enough_counterparties():
+    finding = [{"code": "FAN_OUT", "evidence_ids": ["txn_so1", "txn_so2"]}]
+    check(valid_payload(findings=finding), make_evidence(fan=config.AGENT_FAN_MIN_COUNTERPARTIES))
+    rejected(
+        valid_payload(findings=finding),
+        make_evidence(fan=config.AGENT_FAN_MIN_COUNTERPARTIES - 1),
+        mentioning="not supported",
+    )
 
 
-def test_alerts_from_every_related_alerts_call_can_be_cited():
-    evidence = make_evidence(("txn_a", "txn_b"), related=related_result("txn_x"))
-    evidence.record("get_related_alerts", related_result("txn_y"))
-    claims = [{"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_x", "txn_y"]}]
-    payload = valid_payload(verdict="raise", claims=claims)
-    assert validate_decision(payload, evidence).ok
-    assert {a["txn_id"] for a in evidence.related["alerts"]} == {"txn_x", "txn_y"}
-    assert evidence.related["ids"].count("2|B") == 1
+def test_repeat_alerts_cite_what_get_related_alerts_returned():
+    evidence = make_evidence(related=related_result("txn_x"))
+    ok = [{"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_x"]}]
+    check(valid_payload(findings=ok, next_checks=["REVIEW_RELATED_ALERTS"]), evidence)
+    bad = [{"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_low"]}]
+    rejected(valid_payload(findings=bad, next_checks=[]), evidence, mentioning="txn_low")
 
 
-def test_related_is_none_until_the_tool_runs():
-    assert make_evidence().related is None
+# --- Next checks
+
+
+def test_a_next_check_needs_a_finding_or_gap_that_allows_it():
+    rejected(valid_payload(next_checks=["CHECK_RETURN_FLOW"]), mentioning="MONEY_RETURNS")
+    rejected(valid_payload(next_checks=["REVIEW_RELATED_ALERTS", "CHECK_ACCOUNT_HISTORY"]), mentioning="CHECK_ACCOUNT_HISTORY")
+
+
+def test_a_next_check_may_follow_from_a_gap_code_sets():
+    evidence = make_evidence(truncated=True)
+    check(
+        valid_payload(findings=[], next_checks=["RECHECK_AFTER_MORE_DATA"]), evidence
+    )
+    # No gap, so the same check is refused.
+    rejected(
+        valid_payload(findings=[], next_checks=["RECHECK_AFTER_MORE_DATA"]),
+        mentioning="RECHECK_AFTER_MORE_DATA",
+    )
+
+
+def test_not_checking_account_history_allows_checking_it():
+    evidence = make_evidence(activities=False)
+    check(valid_payload(findings=[], next_checks=["CHECK_ACCOUNT_HISTORY"]), evidence)
+
+
+# --- Summary
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "It moved 3 times.",
+        "Over 5 accounts.",
+        "Roughly fifty accounts.",
+        "Two accounts were involved.",
+        "Hundreds of payments.",
+        "About 1,000 dollars.",
+    ],
+)
+def test_the_summary_carries_no_numbers(summary):
+    rejected(valid_payload(summary=summary), mentioning="summary")
+
+
+def test_the_word_one_is_allowed_in_the_summary():
+    check(valid_payload(summary="One of the accounts paid many others."))
+
+
+def test_the_summary_is_limited_in_length():
+    check(valid_payload(summary="x" * config.AGENT_SUMMARY_MAX_CHARS))
+    rejected(valid_payload(summary="x" * (config.AGENT_SUMMARY_MAX_CHARS + 1)), mentioning="limit")
+
+
+def test_all_problems_are_reported_together():
+    errors = errors_of(
+        valid_payload(
+            findings=[{"code": "FAN_OUT", "evidence_ids": ["txn_invented"]}],
+            next_checks=["CHECK_RETURN_FLOW"],
+            summary="It moved 3 times.",
+        )
+    )
+    assert len(errors) >= 4

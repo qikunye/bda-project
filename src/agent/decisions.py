@@ -1,4 +1,5 @@
-"""Converts one agent result into the decision and case rows that get saved."""
+"""Converts one agent result into the decision and case rows that get saved.
+Rows hold codes, not sentences."""
 
 from src.agent.cases import Case
 from src.agent.contracts import CaseRow, DecisionRow, InvestigateResult, Trigger
@@ -21,8 +22,8 @@ def build_decision_rows(
     Rows hold no Python floats, because DynamoDB rejects them.
     """
 
-    decision, stats = result["decision"], result["stats"]
-    if result["status"] != "ok" or decision is None or stats is None:
+    stats = result["stats"]
+    if result["status"] != "ok" or stats is None:
         raise ValueError("Only a result with status 'ok' has decision rows.")
 
     representative = result["txn_id"]
@@ -35,8 +36,7 @@ def build_decision_rows(
             run_id=run_id,
             trigger=trigger,
             role=role,
-            verdict=decision["verdict"],
-            case_id=decision["case_id"],
+            case_id=result["case_id"],
             representative_txn_id=representative,
             created_at=created_at,
         )
@@ -44,9 +44,10 @@ def build_decision_rows(
     rows = [
         DecisionRow(
             **pointer(representative, "representative"),
-            confidence=decision["confidence"],
-            claims=decision["claims"],
-            note=decision["note"],
+            finding_codes=[f["code"] for f in result["findings"]],
+            gap_codes=[g["code"] for g in result["gaps"]],
+            next_check_codes=[c["code"] for c in result["next_checks"]],
+            summary=result["summary"],
             fallback=stats["fallback"],
             repair_used=stats["repair_used"],
             steps=stats["steps"],
@@ -70,8 +71,8 @@ def build_case_row(
 ) -> CaseRow:
     """The is459_agent_cases item for one case."""
 
-    decision, stats = result["decision"], result["stats"]
-    if result["status"] != "ok" or decision is None or stats is None:
+    stats = result["stats"]
+    if result["status"] != "ok" or stats is None:
         raise ValueError("Only a result with status 'ok' has a case row.")
     return CaseRow(
         day=case.txn_date,
@@ -79,8 +80,7 @@ def build_case_row(
         representative_txn_id=case.representative_txn_id,
         member_txn_ids=list(case.member_txn_ids),
         size=len(case.member_txn_ids),
-        verdict=decision["verdict"],
-        confidence=decision["confidence"],
+        finding_codes=[f["code"] for f in result["findings"]],
         fallback=stats["fallback"],
         run_id=run_id,
         created_at=created_at,

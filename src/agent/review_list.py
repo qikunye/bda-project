@@ -1,20 +1,22 @@
-"""Builds a reordered list for analysts: raised cases first, then other alerts by rank, then
-dont_raise alerts. Every alert stays in the list.
-"""
+"""Attaches each alert's brief to the day's alert list, keeping the list in its original order.
+No alert is ever reordered or removed."""
 
-from typing import Literal, TypedDict
+from typing import TypedDict
 
-from src.agent.contracts import DecisionRow, Verdict
+from src.agent.contracts import DecisionRow, FindingCode, GapCode, RowRole
 
 
 class ReviewItem(TypedDict):
-    position: int
+    position: int  # Same as the BQ1 position: the agent does not reorder.
     txn_id: str
-    # "raised": moved up with its case. "queue": stays in rank order. "not_raised": moved to the bottom.
-    source: Literal["raised", "queue", "not_raised"]
-    verdict: Verdict | None
+    # None when the agent has not run on this alert.
+    role: RowRole | None
+    case_id: str | None
     representative_txn_id: str | None
-    bq1_position: int  # Position in the BQ1 order.
+    # The brief lives on the representative's row. A member has the case's codes, copied from it.
+    finding_codes: list[FindingCode]
+    gap_codes: list[GapCode]
+    has_brief: bool
 
 
 def build_review_list(
@@ -23,40 +25,35 @@ def build_review_list(
     """``queue_txn_ids`` is the day's queue in BQ1 order. Rows outside it are ignored."""
 
     queue = list(dict.fromkeys(queue_txn_ids))
-    bq1_position = {txn_id: i + 1 for i, txn_id in enumerate(queue)}
-    by_txn = {
-        row["transaction_id"]: row
-        for row in rows
-        if row["transaction_id"] in bq1_position
-    }
-
-    def source_of(txn_id: str) -> str:
-        verdict = by_txn[txn_id]["verdict"] if txn_id in by_txn else None
-        return {"raise": "raised", "dont_raise": "not_raised"}.get(verdict, "queue")
-
-    def case_rank(txn_id: str) -> int:
-        """Members of a raised case sort by their representative's rank, so the case stays together."""
-
-        representative = by_txn[txn_id]["representative_txn_id"]
-        return bq1_position.get(representative, bq1_position[txn_id])
-
-    raised = sorted(
-        (t for t in queue if source_of(t) == "raised"),
-        key=lambda t: (case_rank(t), bq1_position[t]),
-    )
-    rest = [t for t in queue if source_of(t) == "queue"]
-    not_raised = [t for t in queue if source_of(t) == "not_raised"]
-
-    return [
-        ReviewItem(
-            position=position,
-            txn_id=txn_id,
-            source=source_of(txn_id),
-            verdict=by_txn[txn_id]["verdict"] if txn_id in by_txn else None,
-            representative_txn_id=by_txn[txn_id]["representative_txn_id"]
-            if txn_id in by_txn
-            else None,
-            bq1_position=bq1_position[txn_id],
+    by_txn = {row["transaction_id"]: row for row in rows}
+    items: list[ReviewItem] = []
+    for position, txn_id in enumerate(queue, start=1):
+        row = by_txn.get(txn_id)
+        if row is None:
+            items.append(
+                ReviewItem(
+                    position=position,
+                    txn_id=txn_id,
+                    role=None,
+                    case_id=None,
+                    representative_txn_id=None,
+                    finding_codes=[],
+                    gap_codes=[],
+                    has_brief=False,
+                )
+            )
+            continue
+        brief_row = by_txn.get(row["representative_txn_id"], row)
+        items.append(
+            ReviewItem(
+                position=position,
+                txn_id=txn_id,
+                role=row["role"],
+                case_id=row["case_id"],
+                representative_txn_id=row["representative_txn_id"],
+                finding_codes=list(brief_row.get("finding_codes", [])),
+                gap_codes=list(brief_row.get("gap_codes", [])),
+                has_brief="finding_codes" in brief_row,
+            )
         )
-        for position, txn_id in enumerate(raised + rest + not_raised, start=1)
-    ]
+    return items

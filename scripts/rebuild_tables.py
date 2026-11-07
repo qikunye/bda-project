@@ -1,10 +1,5 @@
-"""Rebuild the three agent tables for the dates in config.AGENT_SCORED_DATES (PLAN.md D15).
-Athena cannot insert into bucketed tables, so adding a day means dropping and rebuilding them.
-This DELETES the tables and their S3 data while it runs, so it is a dry run unless you pass --yes.
-
-Before it deletes anything it records a fingerprint of every day's ranks, and afterwards it fails if
-a day that existed before now ranks differently.
-"""
+"""Rebuilds the three agent tables for the configured days, and fails if an earlier day now ranks differently.
+Dry run unless you pass --yes, because it deletes the old tables and their S3 data."""
 
 import argparse
 import re

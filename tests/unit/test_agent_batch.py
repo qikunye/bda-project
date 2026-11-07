@@ -10,7 +10,7 @@ from src.agent.loop import LoopSettings
 from src.agent.sql import LabelLeakError
 from tests.unit.agent_loop_fixtures import DAY, stub_tools, turn
 
-SUBMIT = "submit_decision"
+SUBMIT = "submit_brief"
 
 
 def queue_frame(*alerts):
@@ -48,7 +48,7 @@ class PerCaseLLM:
         rep = text.split("Representative alert: ")[1].split(".")[0]
         if len(messages) == 1:
             return turn(("get_case_graph", {"txn_id": rep}))
-        payload = {"verdict": "raise", "confidence": "medium", "claims": []}
+        payload = {"findings": [], "next_checks": [], "summary": "Nothing stands out."}
         return turn((SUBMIT, payload))
 
 
@@ -137,7 +137,7 @@ def test_a_day_becomes_cases_with_decision_case_and_pointer_rows(queue):
         "txn_c": "representative",
     }
     assert by_id["txn_b"]["representative_txn_id"] == "txn_a"
-    assert "claims" in by_id["txn_a"] and "claims" not in by_id["txn_b"]
+    assert "finding_codes" in by_id["txn_a"] and "finding_codes" not in by_id["txn_b"]
     assert by_id["txn_a"]["trace_key"] == "agent/traces/2022-09-14/txn_a.json"
     assert by_id["txn_a"]["case_id"] == "case_txn_a"
     assert (
@@ -148,7 +148,7 @@ def test_a_day_becomes_cases_with_decision_case_and_pointer_rows(queue):
     assert cases["case_txn_a"]["member_txn_ids"] == ["txn_a", "txn_b"]
     assert cases["case_txn_a"]["size"] == 2
     assert cases["case_txn_c"]["size"] == 1  # The cases table lists single alerts too.
-    assert cases["case_txn_c"]["verdict"] == "raise"
+    assert cases["case_txn_c"]["finding_codes"] == []
 
 
 def test_concurrency_does_not_change_the_result(queue):
@@ -206,7 +206,7 @@ def test_a_label_leak_stops_the_whole_batch(queue, monkeypatch):
 
 
 def test_settings_are_passed_to_every_case(queue):
-    # The fake model ignores the forced submit, so a one-step limit sends every case to S1.
+    # The fake model ignores the forced submit, so a one-step limit sends every case to the code-only brief.
     output = run(settings=LoopSettings(max_steps=1))
     assert [r["stats"]["fallback"] for _, r in output.runs] == [True, True]
 

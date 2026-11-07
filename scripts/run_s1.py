@@ -1,13 +1,5 @@
-"""Run the deterministic baseline (S1) for one day against real Athena (PLAN.md milestone 2).
-
-Usage (needs an AWS login for the g1team5 account):
-    python -m scripts.run_s1 --day 2022-09-15 --out /path/to/s1_20220915.json
-    python -m scripts.run_s1 --day 2022-09-15 --out /path/to/s1_b.json --compare-to /path/to/s1.json
-
---compare-to runs the day and fails if its cases, decisions or review list differ from an earlier
-saved run, ignoring only timing. It reads no labels, and writes nothing to AWS except Athena's
-result files.
-"""
+"""Runs the code-only brief for one day on real Athena, reading no labels.
+Use --compare-to to check that two runs of the same day give the same result."""
 
 import argparse
 import json
@@ -17,7 +9,7 @@ from collections import Counter
 
 from src import config
 from src.agent import tools
-from src.agent.baseline import triage_day
+from src.agent.baseline import brief_day
 from src.agent.data import AgentData, athena_runner
 from src.agent.decisions import build_decision_rows
 from src.agent.review_list import build_review_list
@@ -25,7 +17,7 @@ from src.agent.review_list import build_review_list
 
 def run_day(day: str, top_n: int, run_id: str, created_at: str) -> tuple[dict, AgentData]:
     data = AgentData(athena_runner())
-    results = triage_day(data, day, top_n=top_n)
+    results = brief_day(data, day, top_n=top_n)
 
     rows = []
     for case, result in results:
@@ -47,8 +39,10 @@ def run_day(day: str, top_n: int, run_id: str, created_at: str) -> tuple[dict, A
                 "case_id": case.case_id,
                 "representative_txn_id": case.representative_txn_id,
                 "member_txn_ids": list(case.member_txn_ids),
-                "decision": result["decision"],
-                "rendered_claims": result["rendered_claims"],
+                "summary": result["summary"],
+                "findings": result["findings"],
+                "gaps": result["gaps"],
+                "next_checks": result["next_checks"],
             }
             for case, result in results
         ],
@@ -63,11 +57,9 @@ def summarise(output: dict, data: AgentData, seconds: float) -> None:
     sizes = Counter(len(c["member_txn_ids"]) for c in cases)
     print(f"Day {output['day']}: {output['top_n']} alerts -> {len(cases)} cases")
     print("Case sizes:", dict(sorted(sizes.items())))
-    print("Verdicts:", dict(Counter(c["decision"]["verdict"] for c in cases).most_common()))
-    print("Confidence:", dict(Counter(c["decision"]["confidence"] for c in cases).most_common()))
-    print("Claims:", dict(Counter(
-        claim["code"] for c in cases for claim in c["decision"]["claims"]
-    ).most_common()))
+    print("Cases with at least one finding:", sum(bool(c["findings"]) for c in cases))
+    print("Findings:", dict(Counter(f["code"] for c in cases for f in c["findings"]).most_common()))
+    print("Gaps:", dict(Counter(g["code"] for c in cases for g in c["gaps"]).most_common()))
     scanned_gb = data.bytes_scanned / 1024**3
     print(
         f"Athena: {scanned_gb:.2f} GB scanned (about US${scanned_gb / 1024 * 5:.3f}), "
@@ -142,7 +134,7 @@ def main() -> int:
         if difference:
             print("FAILED: first difference at", difference)
             return 1
-        print("PASSED: both runs gave identical cases, decisions and review list.")
+        print("PASSED: both runs gave identical cases, briefs and review list.")
     return 0
 
 

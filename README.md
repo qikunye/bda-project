@@ -1,4 +1,4 @@
-# IS459 anti-money-laundering alert triage
+# IS459 anti-money-laundering alert investigation
 
 An end-to-end big data pipeline that helps an analyst decide which payments to review, what they connect to, and which cases deserve attention first.
 
@@ -8,7 +8,7 @@ It uses the synthetic IBM AML dataset (LI-Medium: 31.25M transactions, 16,041 la
 |---|---|---|
 | **BQ1** alert prioritisation | Where should the analyst start? | A risk score and rank for every transaction, with reasons for the top alerts |
 | **BQ2** case expansion | Where should the analyst investigate next? | The payments into the sender and out of the receiver around an alert |
-| **Triage agent** | Is this alert worth an analyst's time? | A raise, don't raise or not sure decision per case, with checked evidence |
+| **Investigation agent** | What do the payments around this alert show? | An evidence brief per case: money flow, findings with cited payments, gaps and next checks, with no verdict |
 
 ## Pipeline
 
@@ -59,25 +59,28 @@ BQ2 turns transactions into directed payment edges and looks one hop around an a
 
 The default window is 48 hours, chosen from an evaluation on sampled laundering-pattern alerts ([results](bq2_window_tradeoff_evaluation.csv)). At 48 hours, 89% of cases recovered both the upstream and downstream partner, with a median of 3 candidate accounts. Going from 24 to 48 hours raised that from 70%, and 72 hours reached 98% with more payments to review.
 
-## Triage agent
+## Investigation agent
 
-For each day's top 100 alerts, code groups alerts that share an account within the window into cases. An LLM (Sonnet 4.5 on Bedrock) then uses read-only tools to combine BQ1's reasons, BQ2's payments, BQ1's ranks for those payments and other top alerts on the same accounts.
+BQ1 decides which alerts an analyst sees and in what order. The agent helps investigate them. For each day's top 100 alerts, code groups alerts that share an account within the window into cases. An LLM (Sonnet 4.5 on Bedrock) then uses read-only tools to gather BQ2's payments, each account's other activity, BQ1's ranks for the payments nearby and other top alerts on the same accounts, and writes a short brief. It gives no verdict.
 
-| Verdict | Meaning | In the agent's review list |
-|---|---|---|
-| `raise` | Show this case to an analyst | Moves up with its case |
-| `not_sure` | Not enough evidence, including no payments to check | Stays in BQ1 order |
-| `dont_raise` | Payments exist but don't support the model's reasons | Moves to the bottom |
+| Part of the brief | What it is |
+|---|---|
+| Money flow | Where the money came from, where it went, how fast and how much stayed put, per currency. Code only |
+| Findings | Patterns, each citing the payments behind it: pass-through, fan-out, fan-in, money returning to its source, high-ranked neighbours, repeat alerts on the same accounts, activity spikes |
+| Gaps | What could not be seen: no payments, a truncated window, too little time observed after the alert, too little account history |
+| Next checks | What the analyst should look at next, from a fixed list |
+| Summary | One short sentence from the LLM, with no numbers |
 
 The main safeguards:
 
 - **No labels:** the agent reads label-free tables, and a label reaching it stops the run.
-- **Checked evidence:** code checks every cited ID, and the displayed sentences take their numbers from tool results.
-- **Nothing lost:** no alert is ever removed from the BQ1 queue.
-- **Limited runs:** each run has step, token, time and spend caps. If the LLM fails, a fixed-rule baseline (S1) decides and the result is marked as a fallback.
+- **No BQ1 reasons:** they carry almost no information (F35), so the agent never sees them.
+- **Checked evidence:** the same fixed rules that a code-only brief (S1) uses must also find each finding the LLM claims. Code checks every cited ID, and the displayed sentences take their numbers from tool results.
+- **Nothing lost:** no alert is ever removed or reordered. The analyst's list is the BQ1 queue, with the brief attached.
+- **Limited runs:** each run has step, token, time and spend caps. If the LLM fails, S1 writes the brief and the result is marked as a fallback.
 - **Realistic timing:** the batch sees data only up to the end of the alert's day, because that's all a daily run would know.
 
-The agent has no final results yet. See [PLAN.md](PLAN.md) for the design and decisions, and the [output format](docs/agent_output_format.md) for the Streamlit contract.
+The finding thresholds in `src/config.py` are placeholders until they are set from label-free distributions and frozen. The agent has no final results yet. See [PLAN.md](PLAN.md) for the design and decisions, and the [output format](docs/agent_output_format.md) for the Streamlit contract.
 
 ## Status
 
@@ -87,15 +90,15 @@ The agent has no final results yet. See [PLAN.md](PLAN.md) for the design and de
 | BQ1 model, scores and reasons | Done |
 | BQ2 edges and window evaluation | Done |
 | Real-time path | Done, as a prototype proven on replay slices |
-| Agent code | Built and unit tested; the current rules haven't been run on real data |
+| Agent code | Built and unit tested with fakes; not yet run on real data |
 | Agent batch on 14-16 Sep | To do |
 | Agent evaluation | To do |
-| Agent screens in Streamlit | To do |
+| Agent screens in Streamlit | Not started |
 | Automatic trigger from the SQS message | To do |
 
 ## What's in this repository
 
-This repository holds the triage agent and the serving code around BQ1 and BQ2. These parts live elsewhere: the ETL, BQ1 training and feature engineering, the real-time path, and the Stage 5 dashboard (see its [handoff](docs/handovers/STREAMLIT_HANDOFF_OWEN.md)).
+This repository holds the investigation agent and the serving code around BQ1 and BQ2. These parts live elsewhere: the ETL, BQ1 training and feature engineering, the real-time path, and the Stage 5 dashboard (see its [handoff](docs/handovers/STREAMLIT_HANDOFF_OWEN.md)).
 
 | Path | What it is |
 |---|---|

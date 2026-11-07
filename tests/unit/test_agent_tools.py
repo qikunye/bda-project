@@ -13,21 +13,7 @@ ALERT_ID = "txn_aaa111"
 SENDER = "10|A1"
 RECEIVER = "20|B2"
 
-REASON_COLUMNS = {
-    "feature_1": "payment_format",
-    "reason_1": "↑ Paid by ACH",
-    "contribution_1": "3.859",
-    "feature_2": "pair_prior_cnt",
-    "reason_2": "↑ First payment between these two accounts",
-    "contribution_2": "2.249",
-    "feature_3": "hour_of_day",
-    "reason_3": "↓ Paid at 14:00",
-    "contribution_3": "-0.512",
-}
-NO_REASONS = {key: None for key in REASON_COLUMNS}
-
-
-def alert_frame(ts="2022-09-14 10:00:00.000", rank_day="3", reasons=REASON_COLUMNS):
+def alert_frame(ts="2022-09-14 10:00:00.000", rank_day="3"):
     return pd.DataFrame(
         [
             {
@@ -41,7 +27,6 @@ def alert_frame(ts="2022-09-14 10:00:00.000", rank_day="3", reasons=REASON_COLUM
                 "amount_paid": "1500.250000",
                 "payment_currency": "US Dollar",
                 "payment_format": "ACH",
-                **reasons,
             }
         ]
     )
@@ -73,11 +58,60 @@ def edge(
 GRAPH_COLUMNS = list(edge("ALERT", ALERT_ID, SENDER, RECEIVER, 0))
 
 
+def activity(
+    direction,
+    txn_id,
+    counterparty,
+    offset,
+    amount="100.000000",
+    currency="US Dollar",
+    ts="2022-09-14 10:00:00.000",
+):
+    return {
+        "direction": direction,
+        "transaction_id": txn_id,
+        "counterparty_key": counterparty,
+        "transaction_timestamp": ts,
+        "offset_minutes": str(offset),
+        "amount_paid": amount,
+        "payment_currency": currency,
+        "payment_format": "ACH",
+    }
+
+
+ACTIVITY_COLUMNS = list(activity("in", "txn_x", "30|C", 0))
+HISTORY_COLUMNS = [
+    "txn_date",
+    "direction",
+    "payment_currency",
+    "n_payments",
+    "total_amount",
+]
+
+
+def history_row(day, direction, n, total, currency="US Dollar"):
+    return {
+        "txn_date": day,
+        "direction": direction,
+        "payment_currency": currency,
+        "n_payments": str(n),
+        "total_amount": total,
+    }
+
+
 class FakeAthena:
     """Answers each agent statement by matching its text; counts real (uncached) calls."""
 
-    def __init__(self, alert=None, graph=None, scores=None, queues=None):
+    def __init__(
+        self, alert=None, graph=None, scores=None, queues=None, activity=None, history=None
+    ):
         self.alert = alert if alert is not None else alert_frame()
+        self.activity = (
+            activity if activity is not None else pd.DataFrame(columns=ACTIVITY_COLUMNS)
+        )
+        self.history = (
+            history if history is not None else pd.DataFrame(columns=HISTORY_COLUMNS)
+        )
         self.graph = graph if graph is not None else pd.DataFrame(columns=GRAPH_COLUMNS)
         self.scores = scores if scores is not None else pd.DataFrame()
         self.queues = queues or {}
@@ -88,7 +122,11 @@ class FakeAthena:
         stats = QueryStats("q", 1_000_000, 10)
         if "edge_role" in statement:
             return self.graph, stats
-        if "has_reasons" in statement:
+        if "offset_minutes" in statement:
+            return self.activity, stats
+        if "n_payments" in statement:
+            return self.history, stats
+        if "txn_date IN (" in statement:
             return self.scores, stats
         if "ORDER BY risk_rank_day" in statement:
             day = statement.split("txn_date = DATE '")[1][:10]
@@ -104,7 +142,7 @@ def data_for(**kwargs):
 # --- get_alert ---------------------------------------------------------------------------
 
 
-def test_get_alert_returns_typed_fields_reasons_and_ids():
+def test_get_alert_returns_typed_fields_and_ids():
     data, _ = data_for()
     alert = tools.get_alert(data, ALERT_ID, "2022-09-14")
 
@@ -116,20 +154,16 @@ def test_get_alert_returns_typed_fields_reasons_and_ids():
     assert alert["risk_rank_day"] == 3
     assert alert["in_queue"] is True
     assert alert["in_day_top_k"] is True
-    assert alert["reasons"][0] == {
-        "feature": "payment_format",
-        "sentence": "Paid by ACH",
-        "direction": "up",
-        "contribution": 3.859,
-    }
-    assert alert["reasons"][2]["direction"] == "down"
     assert alert["ids"] == [ALERT_ID, SENDER, RECEIVER]
     json.dumps(alert)
 
 
-def test_get_alert_without_reasons_returns_null():
-    data, _ = data_for(alert=alert_frame(reasons=NO_REASONS))
-    assert tools.get_alert(data, ALERT_ID, "2022-09-14")["reasons"] is None
+def test_get_alert_never_returns_bq1_reasons():
+    # The agent does not see the model's reasons, so neither the field nor its columns exist.
+    data, fake = data_for()
+    alert = tools.get_alert(data, ALERT_ID, "2022-09-14")
+    assert "reasons" not in alert
+    assert "feature_1" not in fake.calls[0] and "reason_1" not in fake.calls[0]
 
 
 def test_get_alert_validation_row_is_not_in_queue():
@@ -283,10 +317,293 @@ def test_a_cutoff_cannot_extend_past_the_data_horizon():
     assert graph["horizon_end"] == config.AGENT_DATA_HORIZON
 
 
+@pytest.mark.parametrize(
+    ("ts", "window_h", "as_of", "hours"),
+    [
+        ("2022-09-14 10:00:00.000", 48, None, 48.0),  # Window fits in the data.
+        ("2022-09-16 12:00:00.000", 48, None, 12.0),  # Data ends 12 h after the alert.
+        ("2022-09-14 10:00:00.000", 48, "2022-09-14 23:59:59", 14.0),  # Day-end cutoff.
+        ("2022-09-14 10:00:00.000", 6, "2022-09-14 23:59:59", 6.0),  # Capped at the window.
+    ],
+)
+def test_hours_observed_after_alert_is_capped_at_window_and_data(
+    ts, window_h, as_of, hours
+):
+    graph = get_graph([], ts=ts, window_h=window_h, as_of=as_of)
+    assert graph["hours_observed_after_alert"] == pytest.approx(hours, abs=0.1)
+
+
+def test_returned_to_source_finds_money_back_to_the_senders_sources():
+    graph = get_graph(
+        [
+            edge("UPSTREAM", "txn_u_far", "30|C", SENDER, 300),
+            edge("UPSTREAM", "txn_u_near", "30|C", SENDER, 60),
+            edge("UPSTREAM", "txn_u_other", "31|D", SENDER, 90),
+            edge("DOWNSTREAM", "txn_d_new", RECEIVER, "40|E", 10),
+            edge("DOWNSTREAM", "txn_d_src", RECEIVER, "30|C", 20),
+            edge("DOWNSTREAM", "txn_d_sender", RECEIVER, SENDER, 30),
+        ]
+    )
+    assert graph["returned_to_source"] == [
+        {
+            "account": "30|C",
+            "kind": "upstream_source",
+            "downstream_txn_id": "txn_d_src",
+            "source_txn_id": "txn_u_near",  # Closest upstream payment from that account.
+            "gap_minutes": 20,
+        },
+        {
+            "account": SENDER,
+            "kind": "alert_sender",
+            "downstream_txn_id": "txn_d_sender",
+            "source_txn_id": ALERT_ID,
+            "gap_minutes": 30,
+        },
+    ]
+    for entry in graph["returned_to_source"]:  # Both IDs are citable.
+        assert {entry["downstream_txn_id"], entry["source_txn_id"], entry["account"]} <= set(
+            graph["ids"]
+        )
+
+
+def test_returned_to_source_is_empty_when_money_goes_elsewhere():
+    graph = get_graph(
+        [
+            edge("UPSTREAM", "txn_u1", "30|C", SENDER, 60),
+            edge("DOWNSTREAM", "txn_d1", RECEIVER, "40|E", 10),
+        ]
+    )
+    assert graph["returned_to_source"] == []
+
+
+def test_returned_to_source_checks_edges_beyond_the_display_cap():
+    rows = [
+        edge("DOWNSTREAM", f"txn_d{n:02d}", RECEIVER, f"4{n}|X", n) for n in range(1, 4)
+    ] + [edge("DOWNSTREAM", "txn_d_back", RECEIVER, SENDER, 100)]
+    graph = get_graph(rows, max_edges=2)
+    assert graph["edges_capped"] is True
+    assert "txn_d_back" not in [e["txn_id"] for e in graph["downstream"]]
+    assert [r["downstream_txn_id"] for r in graph["returned_to_source"]] == ["txn_d_back"]
+    assert "txn_d_back" in graph["ids"]
+
+
+def test_returned_to_source_is_limited():
+    rows = [
+        edge("DOWNSTREAM", f"txn_d{n:02d}", RECEIVER, SENDER, n)
+        for n in range(1, config.AGENT_MAX_RETURNED_TO_SOURCE + 5)
+    ]
+    graph = get_graph(rows)
+    assert len(graph["returned_to_source"]) == config.AGENT_MAX_RETURNED_TO_SOURCE
+
+
+def test_flow_reports_onward_share_and_gaps_per_currency():
+    graph = get_graph(
+        [
+            edge("UPSTREAM", "txn_u1", "30|C", SENDER, 60, amount="400.000000"),
+            edge("UPSTREAM", "txn_u2", "31|D", SENDER, 90, amount="600.000000"),
+            edge("DOWNSTREAM", "txn_d1", RECEIVER, "40|E", 15, amount="250.000000"),
+            edge("DOWNSTREAM", "txn_d2", RECEIVER, "41|F", 45, amount="250.000000"),
+            edge("DOWNSTREAM", "txn_d3", RECEIVER, "42|G", 120, amount="250.000000"),
+            edge("UPSTREAM", "txn_ue", "32|H", SENDER, 70, amount="50.000000", currency="Euro"),
+        ]
+    )
+    assert graph["flow"]["US Dollar"] == {
+        "upstream_total": 1000.0,
+        "downstream_total": 750.0,
+        "onward_share": 0.75,
+        "fastest_onward_gap_minutes": 15,
+        "median_onward_gap_minutes": 45.0,
+        "fastest_onward_txn_id": "txn_d1",
+    }
+    # Euro came in but nothing went on: the share is 0, not mixed with dollars.
+    assert graph["flow"]["Euro"]["onward_share"] == 0.0
+    assert graph["flow"]["Euro"]["fastest_onward_gap_minutes"] is None
+    assert graph["flow"]["Euro"]["fastest_onward_txn_id"] is None
+    assert "txn_d1" in graph["ids"]
+
+
+def test_flow_share_is_null_when_nothing_came_in():
+    graph = get_graph([edge("DOWNSTREAM", "txn_d1", RECEIVER, "40|E", 15)])
+    assert graph["flow"]["US Dollar"]["onward_share"] is None
+    assert graph["flow"]["US Dollar"]["fastest_onward_gap_minutes"] == 15
+
+
+def test_flow_is_empty_without_a_graph():
+    assert get_graph([])["flow"] == {}
+    assert get_graph([])["returned_to_source"] == []
+
+
 def test_case_graph_requires_found_alert():
     data, _ = data_for()
     with pytest.raises(ValueError):
         tools.get_case_graph(data, {"found": False}, 48)
+
+
+# --- get_account_activity ----------------------------------------------------------------
+
+
+def get_activity(
+    rows, history=(), side="sender", ts="2022-09-14 10:00:00.000", window_h=48, **kwargs
+):
+    data, fake = data_for(
+        alert=alert_frame(ts=ts),
+        activity=pd.DataFrame(rows, columns=ACTIVITY_COLUMNS),
+        history=pd.DataFrame(list(history), columns=HISTORY_COLUMNS),
+    )
+    alert = tools.get_alert(data, ALERT_ID, ts[:10])
+    return tools.get_account_activity(data, alert, side, window_h, **kwargs), fake
+
+
+def test_account_activity_counts_and_totals_use_every_payment():
+    result, _ = get_activity(
+        [
+            activity("in", "txn_i1", "30|C", -60, amount="400.000000"),
+            activity("in", "txn_i2", "31|D", -30, amount="100.000000"),
+            activity("in", "txn_i3", "30|C", -600, amount="50.000000", currency="Euro"),
+            activity("out", "txn_o1", "40|E", 15),
+            activity("out", "txn_o2", "40|E", 45),
+            activity("out", "txn_o3", "41|F", 90),
+        ]
+    )
+    assert result["account"] == SENDER and result["side"] == "sender"
+    assert (result["n_incoming"], result["n_outgoing"]) == (3, 3)
+    assert result["n_incoming_counterparties"] == 2
+    assert result["n_outgoing_counterparties"] == 2
+    assert result["per_currency_totals"] == {
+        "incoming": {"Euro": 50.0, "US Dollar": 500.0},
+        "outgoing": {"US Dollar": 300.0},
+    }
+    assert result["no_activity"] is False
+    assert result["edges_capped"] is False
+    json.dumps(result)
+
+
+def test_account_activity_picks_the_account_for_each_side():
+    for side, account in (("sender", SENDER), ("receiver", RECEIVER)):
+        _, fake = get_activity([], side=side)
+        assert any(f"account_key = '{account}'" in call for call in fake.calls)
+
+
+def test_account_activity_lists_nearest_to_the_alert_first_in_both_directions():
+    result, _ = get_activity(
+        [
+            activity("in", "txn_far", "30|C", -300),
+            activity("in", "txn_b", "30|C", 20),
+            activity("in", "txn_a", "30|C", -20),
+            activity("out", "txn_late", "40|E", 200),
+            activity("out", "txn_soon", "40|E", 5),
+        ]
+    )
+    assert [p["txn_id"] for p in result["incoming"]] == ["txn_a", "txn_b", "txn_far"]
+    assert [p["txn_id"] for p in result["outgoing"]] == ["txn_soon", "txn_late"]
+    assert result["incoming"][0]["offset_minutes"] == -20
+    assert result["incoming"][0]["counterparty"] == "30|C"
+
+
+def test_account_activity_caps_what_is_shown_but_not_what_is_counted():
+    rows = [activity("out", f"txn_o{n:02d}", f"4{n}|X", n) for n in range(1, 6)]
+    result, _ = get_activity(rows, max_edges=2)
+    assert result["edges_capped"] is True
+    assert result["n_outgoing"] == 5 and result["n_outgoing_counterparties"] == 5
+    assert [p["txn_id"] for p in result["outgoing"]] == ["txn_o01", "txn_o02"]
+    assert "txn_o05" not in result["ids"]
+    assert result["per_currency_totals"]["outgoing"] == {"US Dollar": 500.0}
+
+
+def test_account_activity_ids_cover_what_is_shown():
+    result, _ = get_activity(
+        [activity("in", "txn_i1", "30|C", -5), activity("out", "txn_o1", "40|E", 5)]
+    )
+    assert result["ids"] == [ALERT_ID, SENDER, "txn_i1", "txn_o1", "30|C", "40|E"]
+
+
+def test_account_activity_without_payments_is_flagged():
+    result, _ = get_activity([])
+    assert result["no_activity"] is True
+    assert result["per_currency_totals"] == {"incoming": {}, "outgoing": {}}
+    assert result["ids"] == [ALERT_ID, SENDER]
+
+
+def test_account_activity_excludes_the_alert_and_stays_in_the_window_in_sql():
+    _, fake = get_activity([], ts="2022-09-14 10:00:00.000", window_h=6)
+    statement = fake.calls[1]
+    assert f"transaction_id <> '{ALERT_ID}'" in statement
+    assert "TIMESTAMP '2022-09-14 04:00:00'" in statement
+    assert "TIMESTAMP '2022-09-14 16:00:00'" in statement
+
+
+def test_account_activity_cutoff_ends_the_sql_window_and_truncates():
+    result, fake = get_activity([], as_of="2022-09-14 12:00:00")
+    assert "TIMESTAMP '2022-09-14 12:00:00'" in fake.calls[1]
+    assert result["window_truncated"] is True
+    assert result["hours_observed_after_alert"] == pytest.approx(2.0, abs=0.1)
+
+
+@pytest.mark.parametrize(
+    ("ts", "history_days"),
+    [
+        ("2022-09-14 10:00:00.000", 3),  # 11, 12 and 13 Sep.
+        ("2022-09-15 10:00:00.000", 4),
+        ("2022-09-16 10:00:00.000", 5),
+    ],
+)
+def test_account_activity_history_days_count_whole_days_before_the_alert(ts, history_days):
+    result, _ = get_activity([], ts=ts)
+    assert result["history_days"] == history_days
+
+
+def test_account_activity_history_is_daily_per_direction_and_currency():
+    result, fake = get_activity(
+        [],
+        history=[
+            history_row("2022-09-11", "in", 2, "300.50"),
+            history_row("2022-09-11", "out", 1, "100.25"),
+            history_row("2022-09-11", "out", 1, "10.00", currency="Euro"),
+            history_row("2022-09-13", "in", 4, "40.00"),
+        ],
+    )
+    assert result["daily_history"] == [
+        {
+            "date": "2022-09-11",
+            "n_incoming": 2,
+            "n_outgoing": 2,
+            "incoming_totals": {"US Dollar": 300.5},
+            "outgoing_totals": {"US Dollar": 100.25, "Euro": 10.0},
+        },
+        {
+            "date": "2022-09-13",
+            "n_incoming": 4,
+            "n_outgoing": 0,
+            "incoming_totals": {"US Dollar": 40.0},
+            "outgoing_totals": {},
+        },
+    ]
+    history_sql = fake.calls[2]
+    assert "txn_date BETWEEN DATE '2022-09-11' AND DATE '2022-09-13'" in history_sql
+
+
+def test_account_activity_on_the_first_covered_day_has_no_history_query():
+    # Alerts only exist on scored days, so build the alert by hand to reach this guard.
+    data, fake = data_for()
+    alert = {
+        "found": True,
+        "txn_id": ALERT_ID,
+        "ts": "2022-09-11 10:00:00",
+        "sender": SENDER,
+        "receiver": RECEIVER,
+    }
+    result = tools.get_account_activity(data, alert, "sender")
+    assert result["history_days"] == 0 and result["daily_history"] == []
+    assert not any("n_payments" in call for call in fake.calls)
+
+
+def test_account_activity_rejects_unknown_side_and_missing_alert():
+    data, _ = data_for()
+    alert = tools.get_alert(data, ALERT_ID, "2022-09-14")
+    with pytest.raises(ValueError):
+        tools.get_account_activity(data, alert, "both")
+    with pytest.raises(ValueError):
+        tools.get_account_activity(data, {"found": False}, "sender")
 
 
 # --- get_neighbour_scores ----------------------------------------------------------------
@@ -300,21 +617,18 @@ def test_neighbour_scores_marks_unscored_validation_and_missing():
                 "risk_score": "0.91",
                 "risk_rank_global": "900",
                 "risk_rank_day": "12",
-                "has_reasons": "true",
             },
             {
                 "transaction_id": "txn_n2",
                 "risk_score": "0.40",
                 "risk_rank_global": "90000",
                 "risk_rank_day": "8000",
-                "has_reasons": "false",
             },
             {
                 "transaction_id": "txn_n3",
                 "risk_score": "0.70",
                 "risk_rank_global": "5000",
                 "risk_rank_day": None,
-                "has_reasons": "false",
             },
         ]
     )
@@ -334,10 +648,8 @@ def test_neighbour_scores_marks_unscored_validation_and_missing():
     by_id = {n["txn_id"]: n for n in result["neighbours"]}
 
     assert len(result["neighbours"]) == 5
-    assert (
-        by_id["txn_n1"]["in_day_top_k"] is True
-        and by_id["txn_n1"]["has_reasons"] is True
-    )
+    assert by_id["txn_n1"]["in_day_top_k"] is True
+    assert "has_reasons" not in by_id["txn_n1"]
     assert (
         by_id["txn_n2"]["in_queue"] is True and by_id["txn_n2"]["in_day_top_k"] is False
     )
@@ -431,6 +743,66 @@ def test_related_alerts_hide_anything_after_the_cutoff():
     assert len(fake.calls) == 1  # The next day's queue is never read.
 
 
+def test_related_alerts_accept_counterparty_accounts_from_the_graph():
+    queues = {
+        "2022-09-14": pd.DataFrame(
+            [
+                queue_row("txn_up", "30|C", "70|M", "2022-09-14 07:00:00.000", 6),
+                queue_row("txn_down", "71|N", "40|E", "2022-09-14 13:00:00.000", 8),
+                queue_row("txn_unrelated", "72|O", "73|P", "2022-09-14 10:00:00.000", 9),
+            ]
+        )
+    }
+    data, _ = data_for(queues=queues)
+    result = tools.get_related_alerts(
+        data,
+        [SENDER, RECEIVER, "30|C", "40|E"],
+        "2022-09-14 10:00:00",
+        6,
+        exclude_txn_ids=(ALERT_ID,),
+    )
+    assert [(a["txn_id"], a["account"], a["role"]) for a in result["alerts"]] == [
+        ("txn_up", "30|C", "sender"),
+        ("txn_down", "40|E", "receiver"),
+    ]
+    assert {"30|C", "40|E"} <= set(result["ids"])  # Both can be cited.
+
+
+def test_related_alerts_report_an_alert_once_per_matching_account():
+    queues = {
+        "2022-09-14": pd.DataFrame(
+            [queue_row("txn_both", "30|C", "40|E", "2022-09-14 11:00:00.000", 6)]
+        )
+    }
+    data, _ = data_for(queues=queues)
+    result = tools.get_related_alerts(data, ["30|C", "40|E"], "2022-09-14 10:00:00", 6)
+    assert [(a["txn_id"], a["account"]) for a in result["alerts"]] == [
+        ("txn_both", "30|C"),
+        ("txn_both", "40|E"),
+    ]
+    assert result["ids"] == ["txn_both", "30|C", "40|E"]
+
+
+def test_related_alerts_limit_how_many_accounts_one_call_may_check():
+    data, fake = data_for()
+    accounts = [f"{n}|ACC" for n in range(config.AGENT_MAX_RELATED_ACCOUNTS)]
+    tools.get_related_alerts(data, accounts, "2022-09-14 10:00:00", 6)  # At the limit.
+    with pytest.raises(ValueError, match="At most"):
+        tools.get_related_alerts(
+            data, accounts + ["99|ACC"], "2022-09-14 10:00:00", 6
+        )
+    # Duplicates do not count twice.
+    tools.get_related_alerts(data, accounts + accounts, "2022-09-14 10:00:00", 6)
+
+
+def test_related_alerts_need_at_least_one_valid_account():
+    data, _ = data_for()
+    with pytest.raises(ValueError, match="at least one"):
+        tools.get_related_alerts(data, [], "2022-09-14 10:00:00", 6)
+    with pytest.raises(ValueError):
+        tools.get_related_alerts(data, ["not an account"], "2022-09-14 10:00:00", 6)
+
+
 # --- AgentData ---------------------------------------------------------------------------
 
 
@@ -467,6 +839,8 @@ def test_tool_outputs_never_contain_forbidden_keys():
         tools.get_case_graph(data, alert, 48),
         tools.get_neighbour_scores(data, ["txn_x"], ["2022-09-02"]),
         tools.get_related_alerts(data, [SENDER], alert["ts"], 6),
+        tools.get_account_activity(data, alert, "sender", 48),
+        tools.get_account_activity(data, alert, "receiver", 48),
     ]
     text = json.dumps(outputs)
     for column in config.AGENT_FORBIDDEN_COLUMNS:
