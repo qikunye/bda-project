@@ -17,6 +17,8 @@ class CaseOutcome:
     validation: str | None = None  # valid / repaired / fallback; None for S1.
     observations_dropped: int = 0
     stats: dict = field(default_factory=dict)
+    # BQ1 day rank of the case's representative (best-ranked member), when the run file has it.
+    rank_day: int | None = None
 
 
 def _from_case(raw: dict) -> CaseOutcome:
@@ -34,7 +36,17 @@ def _from_case(raw: dict) -> CaseOutcome:
         validation=stats.get("validation"),
         observations_dropped=stats.get("observations_dropped", 0),
         stats=stats,
+        rank_day=_rank(raw, result),
     )
+
+
+def _rank(raw: dict, result: dict) -> int | None:
+    """run_s1_deep stores the representative's rank; S2 results carry it in the alert."""
+
+    value = raw.get("representative_rank_day")
+    if value is None:
+        value = (result.get("alert") or {}).get("risk_rank_day")
+    return int(value) if value is not None else None
 
 
 def load_run(path: str | Path) -> list[CaseOutcome]:

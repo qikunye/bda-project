@@ -1,5 +1,6 @@
 """Metrics over cases and labels. Pure functions, so they are tested with small hand-made inputs."""
 
+import statistics
 from collections import Counter
 
 from src.evaluation.runs import CaseOutcome
@@ -130,4 +131,59 @@ def reliability(s2: list[CaseOutcome]) -> dict:
         "briefs_with_observations": rate(sum(bool(c.observations) for c in s2), n),
         "observations_kept": observations,
         "observations_dropped": dropped,
+    }
+
+
+def band_by_rank(cases: list[CaseOutcome], edges: tuple[int, ...] = (100, 250)) -> dict[str, str]:
+    """BQ1 rank band of each case, from its representative's day rank.
+
+    With the default edges: ``1-100``, ``101-250`` and ``251+``. Cases without a rank are left out,
+    so mix rank-banded and position-banded results only with care.
+    """
+
+    labels = []
+    low = 1
+    for edge in edges:
+        labels.append((edge, f"{low}-{edge}"))
+        low = edge + 1
+    tail = f"{low}+"
+    out = {}
+    for case in cases:
+        if case.rank_day is None:
+            continue
+        out[case.case_id] = next((name for edge, name in labels if case.rank_day <= edge), tail)
+    return out
+
+
+def _spread(values: list[float]) -> dict:
+    if not values:
+        return {}
+    ordered = sorted(values)
+    return {
+        "mean": round(statistics.fmean(ordered), 1),
+        "median": round(statistics.median(ordered), 1),
+        "p90": round(ordered[min(len(ordered) - 1, int(0.9 * len(ordered)))], 1),
+        "max": round(ordered[-1], 1),
+    }
+
+
+def cost_latency(runs: list[CaseOutcome], price_per_m_tokens: tuple[float, float]) -> dict:
+    """Label-free: tokens, estimated LLM spend and latency per case, from each brief's stats.
+
+    The spend is an estimate from token counts at ``price_per_m_tokens`` (input, output), the same
+    way the batch's spend guard counts it; Cost Explorer reports Bedrock charges late.
+    """
+
+    tokens_in = [c.stats.get("tokens_in", 0) for c in runs]
+    tokens_out = [c.stats.get("tokens_out", 0) for c in runs]
+    latency_s = [c.stats.get("latency_ms", 0) / 1000 for c in runs]
+    spend = [(i * price_per_m_tokens[0] + o * price_per_m_tokens[1]) / 1e6 for i, o in zip(tokens_in, tokens_out)]
+    return {
+        "cases": len(runs),
+        "tokens_in_per_case": _spread(tokens_in),
+        "tokens_out_per_case": _spread(tokens_out),
+        "steps_per_case": _spread([c.stats.get("steps", 0) for c in runs]),
+        "latency_s_per_case": _spread(latency_s),
+        "estimated_spend_usd_total": round(sum(spend), 2),
+        "estimated_spend_usd_per_case": round(sum(spend) / len(runs), 4) if runs else None,
     }
