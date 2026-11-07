@@ -1,8 +1,5 @@
-"""Group the day's top alerts into cases, with no LLM (PLAN.md 7.1, D26).
-
-Two alerts are linked if they share an account and are within the window of each other. Alerts are
-added best rank first. A link that would push a case over the size cap is skipped, so the alert
-starts or stays in another case. This keeps the result the same on every run.
+"""Groups a day's top alerts into cases, linking alerts that share an account within a time window.
+No LLM is involved, so the grouping is the same on every run.
 """
 
 from dataclasses import dataclass

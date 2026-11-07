@@ -139,16 +139,15 @@ def make_evidence(
         members=tuple(members),
         txn_dates={m: DAY for m in members},
     )
-    evidence.record("get_alert", alert_result(members[0], reasons=reasons), "{}")
+    evidence.record("get_alert", alert_result(members[0], reasons=reasons))
     evidence.record(
         "get_case_graph",
         graph_result(members[0], downstream, truncated=truncated),
-        "{}",
     )
     if ranks:
-        evidence.record("get_neighbour_scores", neighbour_scores_result(ranks), "{}")
+        evidence.record("get_neighbour_scores", neighbour_scores_result(ranks))
     if related is not None:
-        evidence.record("get_related_alerts", related, "{}")
+        evidence.record("get_related_alerts", related)
     return evidence
 
 

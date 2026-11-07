@@ -1,45 +1,46 @@
 # IS459 AML: agent plan
 
-Owner: Claire (agent). Last updated 7 Nov 2026. Team split: `WORK_SPLIT.md` (deleted from the working folder but still in git: `git show HEAD:WORK_SPLIT.md`). ETL and real-time details: `ETL_v2_Handover.docx` (kept outside this repo).
+Owner: Claire (agent and evaluation). Last updated 7 Nov 2026. Team split: `WORK_SPLIT.md` (deleted from the working folder but still in git: `git show HEAD:WORK_SPLIT.md`). ETL and real-time details: `ETL_v2_Handover.docx` (kept outside this repo).
 
-**Status:** the ETL and real-time pipelines are finished. Agent data access, the output format, S1, the LLM loop, the batch runner and `investigate()` are built, and 424 unit tests pass. The current rules (D27, D28) have only run on fake data in tests, not on AWS or the real LLM. The saved 14 Sep batch (F29) predates them, so its rows are out of date.
+**Status:** the ETL and real-time pipelines are finished. The agent is built as a triage tool: it gives each case a verdict of `raise`, `dont_raise` or `not_sure`. Its rules are frozen in commit `91e344e` (not pushed), and 435 unit tests pass. Tests on 14 Sep (F33, F34) showed the verdict mostly repeats BQ1, so we propose turning the agent into an investigation assistant (section 3). Nothing from the current rules is saved yet. DynamoDB holds only out-of-date 14 Sep rows (F29), and no one has looked at labels.
 
 ## Where to continue
 
-Changes made on 7 Nov, in commit `451b0c8` on `feat/agent`: the use case is now triage; promotions and the merge verdict are gone; the batch has an end-of-day cutoff; no payments means `not_sure`; results list every case member; the review list is simpler; the Copilot and old `app.py` are deleted; the README covers the whole project.
-
-1. **Commit the BQ2 restore.** `src/bq2/evidence.py`, `transforms.py` and their tests are back but not committed yet.
-2. **Tell the team.** Person 2: the contract changed (`docs/agent_output_format.md`: new `members` field, no `promoted_txn_ids`). Person 4: the evaluation changed (section 13). Don't use the saved 14 Sep rows.
-3. **Check billing.** Confirm whether credits cover Sonnet (section 15).
-4. **Rerun the sample** (about US$1.50): `python -m scripts.run_agent_sample --day 2022-09-14 --limit 20 --out <file>`. Check the share of cases raised against F29's 92%, plus the valid, repair and fallback rates.
-5. **If it still raises nearly everything,** tighten the prompt in `src/agent/prompts.py`, so only stronger evidence raises a case, and rerun the sample.
-6. **Run the batch** on 14, 15 and 16 Sep with `--save` (step 5 in section 19), and hand the run IDs to Person 4.
-7. **Then build the new-day path** (step 6), including the risks in section 15.
+1. **Agree the change with the team (D31, proposed).** Person 2 builds the app against the output format, so they must agree before any code changes. Check that the timeline allows it. If not, fall back to the frozen triage version: run its batch, and evaluate `raise` against `not_sure`.
+2. **Write the new output format** in `docs/agent_output_format.md` (section 6.3), and get Person 2's agreement.
+3. **Extend the tools** (section 5, proposed fields): hours observed, the sender's and receiver's other payments, and money returning to its source.
+4. **Build S1 as a brief from code alone** (section 8). It finds the same patterns by fixed rules, with no LLM.
+5. **Build the LLM brief (S2):** prompt, contract, validator and claim rendering (section 6). The review list keeps BQ1's order (section 7.2).
+6. **Fix the `nan` reason sentences** (F34) in the reasons data, or hide them in the app.
+7. **Do a dry run on 14 Sep, then freeze** before anyone looks at labels. Then run 14, 15 and 16 Sep with `--save` (about US$12) and record the run IDs here.
+8. **Evaluation** (section 13), then the **new-day path** and **recordings** (section 19).
 
 Keep this file short: current facts and decisions only. Section, finding and decision numbers have gaps because code comments cite them, so don't renumber them. Git history has everything removed.
 
 ## 1. Facts
 
 - **Dataset:** IBM AML LI-Medium, synthetic. Don't claim real-world detection performance.
-- **AWS:** us-east-1, account 941377154820, bucket `s3://is459-aml-g1t5/`, IAM user `g1team5`. About US$220 of US$250 left on 6 Nov.
+- **Patterns file:** `s3://is459-aml-g1t5/bronze/ibm-aml/li-medium/patterns/LI-Medium_Patterns.txt` lists the laundering attempts and their types. It is ground truth, so only the evaluation may read it.
+- **AWS:** us-east-1, account 941377154820, bucket `s3://is459-aml-g1t5/`, IAM user `g1team5`. About US$210 of US$250 credit left on 7 Nov (estimated). Sonnet billing is confirmed. Cost Explorer shows Sonnet charges late, so use the run's own spend estimate.
 - **BQ1:** frozen XGBoost 3.2.0, iterations 0-96, 26 features. Test days are 14-16 Sep 2022. Recall@1% 0.634, precision@1% about 3.1%. `risk_score` ranks; it is not a probability.
 - **BQ2:** one-hop, directed edges, window 6-72 h, default 48 h. Upstream = payments into the alert's sender before it. Downstream = payments out of its receiver after it.
 - **Gold tables** (`is459_aml_gold`, partitioned by `txn_date`): `bq1_risk_scores_medium_v2`, `bq1_features_medium_v2`, `bq2_graph_edges_medium_v2`. All contain labels.
 - **Agent tables** (label-free, `agent/tables/`, read by the tools): `agent_scores_v2`, `agent_edges_v2`, `agent_day_queue_v2`. Built by `sql/agent/01-06`.
 - **Demo alert:** `txn_a0f703e20da6f9bf0bdad4c0d62862de`, 14 Sep 10:57, day rank 2, has reasons, complete 48 h graph (22 neighbours).
-- **Commands:** tests `.venv/bin/python -m pytest tests` (bare `pytest` fails on a name clash). Tools `python -m scripts.smoke_agent_tools`. S1 `python -m scripts.run_s1 --day <day> --out <file> [--compare-to <earlier file>]`.
+- **Cost:** about US$0.05 per case with Sonnet 4.5; a day's top 100 alerts (about 78 cases) costs about US$4 and takes about 10 minutes (F33).
+- **Commands:** tests `.venv/bin/python -m pytest tests` (bare `pytest` fails on a name clash). Tools `python -m scripts.smoke_agent_tools`. S1 `python -m scripts.run_s1 --day <day> --out <file>`. LLM sample `python -m scripts.run_agent_sample --day <day> --limit 20 --out <file>`. Batch `python -m scripts.run_batch --day <day> --out <file>` is a dry run; add `--save` to write.
 
 ## 2. Hard rules
 
 1. **Read-only tools.** The agent writes only to its decisions and cases tables and its trace prefix. It doesn't touch ETL, Silver, Gold or v1.
-2. **No labels.** Label-free tables, a column allowlist and a test that fails on a label. `data_split` is banned too. Only the evaluation module reads labels, and the agent never imports it.
-3. **Never remove an alert from the BQ1 queue.** The agent only produces a second, reordered list.
-4. **All numbers and IDs come from tools.** The LLM picks tools, verdicts and claim codes. Code checks every cited ID and writes the displayed sentences.
+2. **No labels.** Label-free tables, a column allowlist and a test that fails on a label. `data_split` and the patterns file are banned too. Only the evaluation module reads labels, and the agent never imports it.
+3. **Never remove an alert from the BQ1 queue.** BQ1 decides the order; the agent adds evidence.
+4. **All numbers and IDs come from tools.** The LLM picks tools and finding codes, and writes text with no numbers. Code checks every cited ID and writes the displayed sentences.
 5. **Currency-safe.** Never sum across currencies.
 6. **Bounded.** At most 5 tool steps per run, plus token, timeout and global spend caps.
 7. **Reasons are model explanations, not proof.**
 
-## 3. Pipeline
+## 3. Pipeline and purpose
 
 ```
 DAILY      raw CSV → Step Functions is459-etl-v2-silver-wap → Gold
@@ -53,7 +54,14 @@ REAL-TIME  Kinesis → Lambda is459-rt-scorer (same model, 26 features)
            Display only: no agent (D17). A prototype proven on replay slices.
 ```
 
-The agent answers: *is this alert worth an analyst's time, and what else belongs with it?* It combines the BQ1 alert, BQ2 money flows and BQ1 scores on those neighbours. The use case is triage: raise the alerts that matter, with evidence, so the analyst needn't gather it by hand. The test, not a claim: raised alerts are more often laundering than alerts not raised.
+**Purpose (proposed, D31).** BQ1 already decides which alerts an analyst sees. The agent helps investigate them: for each alert or case, it gathers the BQ2 money flow and BQ1 scores around it into a short brief, so the analyst doesn't have to compare BQ1 and BQ2 by hand. A brief has:
+- **Money flow:** where the money came from, where it went, how quickly, and how much stayed put. Code fills in all amounts, per currency.
+- **Findings:** patterns, each citing the payments behind it. These are pass-through, fan-out, fan-in, money returning to its source, high-ranked neighbours, and repeat alerts on the same accounts.
+- **Gaps:** no graph, a short observed time, or no reasons.
+- **Next checks:** what the analyst should look at next, from a fixed list.
+- **Summary:** one short sentence from the LLM, with no numbers.
+
+The current code still produces triage verdicts, as described in D27-D30.
 
 ## 4. Triggers
 
@@ -72,97 +80,95 @@ All are in `src/agent/tools.py`, and every result has an `ids` list.
 
 **5.1 Tables:** `v_agent_scores` and `v_agent_edges` are the label-free sources for the agent tables. **5.2** Tools cache by SQL text, so repeats cost nothing.
 
+**5.3 Proposed additions (D31):**
+- `hours_observed_after_alert` on `get_case_graph`: from the alert to the end of visible data, capped at the window. "No onward payment after N hours" then becomes evidence, not just an unknown (F34).
+- **Sibling payments:** the sender's other outgoing and the receiver's other incoming payments, for fan-out and fan-in. `agent_edges_v2` already has both directions.
+- **Money returning to its source:** flag when a downstream payment goes to an account that appears upstream.
+
 ## 6. Agent loop (built: `src/agent/llm.py`, `prompts.py`, `validate.py`, `loop.py`)
 
 ```
 seed = get_alert(...)   # by code
-for step in 1..5: LLM sees policy + seed + prior results, returns a tool call or submit_decision
-invalid after 1 repair, or no decision by step 5 → S1 decision, fallback=true
+for step in 1..5: LLM sees policy + seed + prior results, returns a tool call or submit
+invalid after 1 repair, or no answer by step 5 → S1 result, fallback=true
 ```
 
-Bedrock Converse with native tool calling, temperature 0. Log steps, tokens, latency and validation outcome.
+Bedrock Converse with native tool calling, temperature 0. Log steps, tokens, latency and validation outcome. The 5th step must be the submit call. A repair is one extra reply outside the 5.
 
-**6.2 Policy prompt (short):** triage assistant with read-only tools and no labels; decide only from tool results and cite IDs; write no numbers. Guide, not hard rules:
-Three verdicts (D27): `raise`, `dont_raise`, `not_sure`. Code groups related alerts, so there is no merge verdict.
-- Graph supports the reasons, or several neighbours rank high → `raise`.
-- Payments exist but don't support the reasons → `dont_raise`.
-- No graph, or not enough evidence either way → `not_sure`.
-- Truncated window → say so. Truncation alone is no reason to avoid a verdict.
+**6.2 Prompt (proposed):** an investigation assistant with read-only tools and no labels. Gather the flow around the alert, report the patterns the results show, name the gaps, and pick the next checks. Cite IDs, and write no numbers.
 
-**6.3 Output and validation:** the `Decision` type in `src/agent/contracts.py`. Code must check:
-1. The JSON matches the schema, and the verdict and claim codes are valid.
+**6.3 Output and validation.** The current `Decision` type in `src/agent/contracts.py` holds a verdict. The proposal replaces it with a brief: `findings` (code + `evidence_ids`), `gaps`, `next_checks` and `summary`. Code must check:
+1. The JSON matches the schema, and every code is valid.
 2. Every `evidence_ids` member appears in a tool result's `ids` from this run. Code sets `case_id` (D25).
-3. `dont_raise` is rejected when every graph fetched has no payments.
-4. `note` is at most 200 characters, with digits only if they appear in tool results.
+3. Each finding is backed by its tool results. For example, a pass-through must cite payments listed by `get_case_graph`.
+4. `summary` is at most 200 characters, with no digits or spelled-out numbers.
 5. `NO_GRAPH_AVAILABLE`, `TRUNCATED_WINDOW` and `NO_REASONS_AVAILABLE` match the tool flags.
 
 ## 7. Cases and review list (built)
 
 **7.1** `src/agent/cases.py`: link alerts that share an account within the window; cap of 20; best rank is the representative.
 
-**7.2** `src/agent/review_list.py`: `raise` cases first, then the rest by rank, then `dont_raise` alerts. No alert leaves the list.
+**7.2** `src/agent/review_list.py` currently orders by verdict. Proposed: keep BQ1's order, and attach the brief to each alert.
 
-**7.3** Each result has `members`: every alert in the case with its payments. Code fetches any graph the LLM skipped, after the decision, so these never reach the LLM.
+**7.3** Each result has `members`: every alert in the case with its payments. Code fetches any graph the LLM skipped, after it answers, so these never reach the LLM.
 
 ## 8. S1 baseline (built)
 
-`src/agent/baseline.py`, same tools and fixed rules, first match wins:
-1. **raise:** at least 2 high-ranked transactions (members, plus neighbours in the top 500).
-2. **not_sure:** anything else, including no payments to check.
+`src/agent/baseline.py`, same tools, fixed rules. It is currently a triage rule: `raise` with at least 2 high-ranked transactions (members plus neighbours in the top 500), otherwise `not_sure`. It is also the LLM's fallback.
 
-S1 has no `dont_raise` rule, so only the LLM can move an alert down.
+Proposed: S1 becomes a brief built by code alone. It finds the same patterns by fixed thresholds. The evaluation then shows what the LLM adds over code.
 
-S0 = BQ1 order. S1 = these rules. S2 = LLM agent.
+S0 = BQ1 order with no brief. S1 = code-only brief. S2 = LLM brief.
 
 ## 9. LLM
 
-`AGENT_MODEL_ID` is Sonnet 4.5, `us.anthropic.claude-sonnet-4-5-20250929-v1:0` (D23). Backup: Nova 2 Lite, `us.amazon.nova-2-lite-v1:0`. Measure tokens and cost on the first 20 alerts.
+`AGENT_MODEL_ID` is Sonnet 4.5, `us.anthropic.claude-sonnet-4-5-20250929-v1:0` (D23). Backup: Nova 2 Lite, `us.amazon.nova-2-lite-v1:0`.
 
 ## 10. Storage
 
-- `is459_agent_decisions` (holds the outdated 14 Sep run, F29): key `transaction_id`, rows as in `DecisionRow`.
-- `is459_agent_cases` (created 8 Nov, on-demand, tagged `project=is459-g1t5-etl-v2`): key `day` + `case_id`. One item per case, singles included (`CaseRow` in `contracts.py`).
+- `is459_agent_decisions`: key `transaction_id`, rows as in `DecisionRow`. Holds only the out-of-date 14 Sep run (F29).
+- `is459_agent_cases` (on-demand, tagged `project=is459-g1t5-etl-v2`): key `day` + `case_id`. One item per case, singles included (`CaseRow` in `contracts.py`).
 - Traces: `s3://is459-aml-g1t5/agent/traces/<day>/<txn_id>.json`.
 - A batch rerun writes the new rows first, then deletes that day's rows it did not rewrite (scan on `day`, no index). If any case failed, nothing is written or deleted. Each alert is in one case, so each transaction gets one row.
+- The brief changes the row contents, not the tables or keys.
 
 ## 11. Streamlit
 
-Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say full days end on 16 Sep 2022, reasons are not proof, and the data is synthetic. It reads DynamoDB, never SQS.
+Owned by Person 2. Contract: `docs/agent_output_format.md` (changes with D31). The app must say full days end on 16 Sep 2022, reasons are not proof, and the data is synthetic. It reads DynamoDB, never SQS. Don't present `REASONS_CORROBORATED` as strong evidence (F34).
 
 ## 12. Milestones
 
 | # | Milestone | Owner | Status |
 |---|---|---|---|
 | 1 | Data access | Claire | Done |
-| - | Output format | Claire | Done |
-| 2 | Case grouping + S1 | Claire | Done |
-| 3 | Evaluation harness | Person 4 | To do |
-| 4 | LLM loop + validator | Claire | Built, rules changed 7 Nov. 20-case rerun next |
-| 5 | Batch runner, `investigate()` | Claire | Built, rules changed 7 Nov. 14-16 Sep runs to do (F29 is out of date) |
-| 6 | Streamlit | Person 2 | To do |
-| 7 | Full evaluation | Person 4 | To do |
+| 2 | Case grouping + S1 | Claire | Done (triage rules); code-only brief proposed |
+| 3 | Evaluation harness | Claire | To do; waits on D31 |
+| 4 | LLM loop + validator | Claire | Done for triage (`91e344e`); brief version proposed |
+| 5 | Batch runner, `investigate()` | Claire | Done; saved 14-16 Sep runs wait on D31 |
+| 6 | Streamlit | Person 2 | To do; output format changes with D31 |
+| 7 | Full evaluation | Claire | To do |
 | 8 | New-day path, queue consumer | Claire | To do; required for the recorded run |
 
-## 13. Evaluation (Person 4)
+## 13. Evaluation (Claire, proposed for D31)
 
-- **Days:** 14-16 Sep only, test rows only, reported per day. Every day is seen as of its own end (D28). Anything reading Gold must filter to these dates.
-- **Budget:** K = 100, because the batch reviews the top 100. Recall@K alone can't measure triage, because reordering inside K doesn't change it.
-- **Main test:** laundering rate by verdict (`raise`, `not_sure`, `dont_raise`) against the top-100 average, and how many `dont_raise` alerts were actually laundering. Report counts with rates: 3 days is about 230 cases.
-- **Also:** share of cases raised, review items per case, valid/repair/fallback/rejected-citation rates, cost and latency, S1-S2 agreement.
-- **Repeatability:** run a 50-alert subset 3 times.
-- **Honesty:** if S2 doesn't beat S1, report that, and what the LLM adds in traces and flexibility.
+- **Days:** 14-16 Sep only, test rows only, top 100 alerts per day, reported per day. Every day is seen as of its own end (D28). Anything reading Gold must filter to these dates.
+- **Labels only after the freeze.** Tune without labels, freeze in a commit, then evaluate. Report any later change separately, as tuned after the results.
+- **Are the findings accurate?** Every finding must cite tool results. Report the rejected-citation, repair and fallback rates.
+- **Do the clues carry information?** For each finding code, compare the laundering rate of alerts with it and without it. Report counts with rates: 3 days is about 300 alerts.
+- **Does it name the right pattern?** For alerts in a laundering attempt from the patterns file, compare the agent's pattern findings with the attempt's type. For reference, the real-time explainer's typology macro-F1 is 0.345 (F21).
+- **What does the LLM add?** Compare S2 with S1 on the measures above. If the LLM adds nothing over code, report that.
+- **Also:** cost and latency, and repeatability: run a 50-alert subset 3 times.
+- **Not measurable here:** time saved for analysts. Show example briefs instead.
 
 ## 15. Risks and open items
 
-- **Sonnet billing:** check whether Anthropic usage is billed through Marketplace and covered by credits before running beyond 20 alerts. It wasn't visible in Cost Explorer on 7 Nov.
+- **Timeline:** the change touches the output format, the prompt, the validator, S1 and the evaluation. If time is short, fall back to the frozen triage version (`91e344e`).
+- **Code may do most of the work:** many patterns can be found by fixed rules. If S2 adds little over S1, the LLM's value is the summary and next checks, so say so.
+- **Patterns file fit:** attempts may span days or accounts outside the top 100, so only some alerts will match an attempt. Check coverage before relying on it.
 - **Where the batch runs:** undecided. A Lambda that starts a Glue job doesn't fit "delete the message only on success", because a Lambda SQS trigger removes the message when the Lambda returns. Glue Python shell may also be too old, as `contracts.py` needs 3.10+ (check this). Suggested for the one recorded run: a simple poller on a laptop or small EC2 instance. CloudShell may time out when idle.
-- **Queue timing:** the visibility timeout is 15 minutes (F20), but the batch takes about 11 minutes plus the rebuild. The message can reappear mid-run and start a duplicate, so the consumer must keep extending the timeout while it works.
-- **Silent fallback:** Bedrock errors and the spend cap become S1 decisions, not failures, so an outage could still publish as S2. Consider blocking `publish` above a set fallback rate.
-- **Missing sibling payments:** the graph leaves out the sender's other outgoing payments and the receiver's other incoming ones, which matter for fan-out and fan-in. `agent_edges_v2` already has both directions, so adding them should be a small change. Not started.
-- **Over-raising:** 72 of 78 cases moved up on 14 Sep (F29), so the agent may barely filter. If the rerun looks the same, tighten the prompt so only stronger evidence raises a case.
-- **`dont_raise`:** these alerts may be one-off transactions rather than harmless.
-- **S1 as a comparison:** it never says `dont_raise`, so compare it with S2 as raised against not raised.
-- **18 Sep run:** can happen only once, so record from the start, and rehearse the whole path first on a test message. 19 Sep (244 transactions) is the backup. It's too small and has no reasons, so it isn't a result. With about 350 transactions, every same-day neighbour is inside the top 500, so expect mostly `raise`.
+- **Queue timing:** the visibility timeout is 15 minutes (F20), but the batch takes about 10 minutes plus the rebuild. The message can reappear mid-run and start a duplicate, so the consumer must keep extending the timeout while it works.
+- **Silent fallback:** Bedrock errors and the spend cap become S1 results, not failures, so an outage could still publish as S2. Consider blocking `publish` above a set fallback rate.
+- **18 Sep run:** can happen only once, so record from the start, and rehearse the whole path first on a test message. 19 Sep (244 transactions) is the backup. It's too small and has no reasons, so it isn't a result.
 - **To confirm:** D24, D25.
 
 ## 16. Findings still in force
@@ -170,7 +176,7 @@ Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say ful
 - **F2** Labels are in the scores, edge and features tables.
 - **F3** v1 = v2 on 14-16 Sep. v2 edges for 1-13 Sep point at v1's S3 folders.
 - **F4** 14 Sep 00:00-05:37 is `validation` (488,561 rows). Queues and evaluation use test rows only.
-- **F6** Data effectively ends 16 Sep. With the end-of-day cutoff (D28), nearly every batch alert is truncated downstream on every day, so truncation is normal.
+- **F6** Data effectively ends 16 Sep. With the end-of-day cutoff (D28), nearly every batch alert's window is truncated, so the flag alone says little. See F34 for hours actually observed.
 - **F7** Neighbours before 14 Sep have no v2 score.
 - **F8** `build_alert_lookup_query` has no date filter (0.9 GB), so don't use it. The v2 edges have no self-transfers.
 - **F9** Workgroup `primary`. Always set the output to `s3://is459-aml-g1t5/athena-results/agent/`.
@@ -183,7 +189,14 @@ Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say ful
 - **F22** New days have `data_split = 'excluded'`, but `v_agent_scores` ranks only `test` rows, so a new day has an empty queue until fixed (step 6).
 - **F23** New days have no reasons.
 - **F24** `is459-agent-readonly` misses the agent tables, S3 `agent/`, `is459_agent_cases`, `BatchGetItem` and Bedrock, and allows labelled tables. Irrelevant while running as `g1team5`.
-- **F26** (old rules: names predate D27, and it had promotions and no cutoff) S1 on 15 Sep: 100 alerts → 77 cases. need_more 36, escalate 30, deprioritise 7, promote 4. All low confidence (F6). 5.6 GB, about US$0.03, about 12 minutes. Two runs matched. No labels used yet.
+- **F28** `investigate()` on a single alert sets `case_id` to null, and its result can differ from the batch's, where the same alert may sit in a case. The app must not assume a `case_id`.
+- **F29** DynamoDB and S3 hold an out-of-date 14 Sep run (`batch-2022-09-14-20261107T034826Z`) with old verdict names and no cutoff. Don't use it. The next saved 14 Sep run replaces it.
+- **F33** Final triage dry run on 14 Sep, frozen rules, not saved: 78 cases (100 alerts), raise 42, not_sure 36, dont_raise 0. Valid 72, repaired 6, fallback 0. Raise rates are nearly flat across the top 100. US$4.12, 2.06 GB Athena. Local copy, in a temporary folder that may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/77926439-18a2-424e-a652-47c5a6dabd0a/scratchpad/batch_0914_dry2.json`.
+- **F34** What the triage runs showed (no labels used):
+  - **The verdict mostly repeats BQ1.** Two of the three signals behind `raise` are BQ1 scores: high-ranked neighbours and repeat alerts. Only the fast chain is new evidence from BQ2.
+  - **The reasons can't be disproved by payments.** All 78 alerts have "Paid by ACH" and "First payment between these two accounts". So `REASONS_CORROBORATED` says little, and `dont_raise` (unsupported reasons) almost never applies.
+  - **No onward payments isn't the cutoff's fault.** The 18 cases with payments but no further signal show 0 downstream payments, though they had a median of 8.2 h (up to 14.4 h) before the end of the day. Meanwhile, 25 of the 42 raised cases show same-day downstream payments. The LLM treats the gap as unknown because no field says how many hours were observed.
+  - **Some reasons contain `nan`.** For 8 of 78 alerts, e.g. "Amount is nanx the sender's usual payment". It comes from the reasons data (D5).
 
 ## 17. Decisions in force
 
@@ -210,15 +223,11 @@ Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say ful
 | D23 | Sonnet 4.5 first; Nova 2 Lite as backup. |
 | D24 | Full row for the representative, short pointer rows for other members. *To confirm.* |
 | D25 | Code sets `case_id`. `investigate(txn_id, txn_date, window_h)`. *To confirm.* |
-| D26 | S1 order is raise, not_sure. High-ranked = member or top-500 neighbour. No graph means low confidence. Truncation caps the LLM's confidence at medium. |
-| D27 | Verdicts are `raise`, `dont_raise`, `not_sure`. `merge_into_case`, `promote` and `promoted_txn_ids` are gone: code groups related alerts, and the agent judges only the top 100. No graph means `not_sure`. |
+| D26 | S1 uses the same tools with fixed rules and is the LLM's fallback. High-ranked = member or top-500 neighbour. No graph means low confidence; truncation caps the LLM's confidence at medium. |
+| D27 | Current code: verdicts `raise`, `dont_raise`, `not_sure`; code groups related alerts. Replaced if D31 is agreed. |
 | D28 | The batch and S1 see data only up to the end of the alert's day, because that is all a daily run knows. `investigate()` has no cutoff, because an analyst clicks later. |
-
-- **F27** (superseded by F29) LLM sample, 20 cases on 14 Sep, Sonnet 4.5, run once with a validator bug: 12 valid, 6 repaired, 2 fallback. About 17k tokens in, 1.5k out and 38 s per run, about US$0.075 per run (list price). The bug kept only the last `get_related_alerts` call, so correct citations were rejected and both fallbacks followed. It is fixed and tested, but not rerun, so these rates are too pessimistic. Verdicts: merge_into_case 16, escalate 3, deprioritise 1, promote 0. Confidence high in 13 (14 Sep has complete graphs). Saved in a temporary folder, so it may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/b2eb27de-ce80-4d1d-a2a6-7d6b874c44b8/scratchpad/sample_20.json`.
-
-- **F28** `investigate()` on the demo alert (real run): valid, 4 steps, 23.6k tokens in, 46 s, graph 8 in and 14 out. It is a single alert, so `case_id` is null even when the verdict is `merge_into_case`, and its verdict may differ from the batch's, where the same alert sits in a case. The UI should not assume a `raise` has a `case_id`.
-
-- **F29** 14 Sep batch, run `batch-2022-09-14-20261107T034826Z`, saved to DynamoDB and S3 (100 decision rows: 78 representatives and 22 members; 78 case rows; 78 traces; no collisions). 78 cases, 0 errored. Valid 66 (85%), repaired 12 (15%), fallback 0, so the F27 validator fix worked. About 16k tokens in and 1.4k out per run, 34 s per run, 11 minutes, US$5.43 estimated, 5.5 GB Athena. Verdicts: merge_into_case 54, escalate 18, deprioritise 3, need_more 3, promote 0, so 72 of 78 cases (92%) move up. Merge was used for 37 of the 58 single-alert cases, where nothing can be merged, so the label carries little. Only 7 cases had a neighbour ranked 501-5000, the rest were far lower (median about 977,000), and none was promoted. S1 promotes in that band. Old verdict names (D27). The saved 14 Sep rows still use them and could see later days, so rerun 14 Sep before Person 4 uses them. Local copy, in a temporary folder that may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/b2eb27de-ce80-4d1d-a2a6-7d6b874c44b8/scratchpad/batch_0914.json`.
+| D30 | The triage rules are frozen in commit `91e344e`, before anyone looked at labels. This is the fallback if D31 is not agreed. Any version is frozen in a commit before labels are read. |
+| D31 | *Proposed, needs team agreement.* The agent becomes an investigation assistant: BQ1 keeps the order, and the agent writes an evidence brief per alert or case (section 3). S1 becomes a code-only brief. Evaluation as in section 13. |
 
 ## 18. Data access (built)
 
@@ -226,29 +235,19 @@ Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say ful
 
 ## 19. Remaining agent work (Claire)
 
-Steps 1-4 are built and tested (424 tests). File names for later steps are proposals.
-
-**Step 3: LLM loop and validator (milestone 4), built**
-- Files: `llm.py`, `prompts.py`, `validate.py`, `loop.py`, and `scripts/run_agent_sample.py` for the sample run.
-- Choices beyond section 6: the 5th step is forced to be `submit_decision`; the repair is one extra reply outside the 5; the model may only use IDs a result already showed; code adds missing caveat claims (no graph, truncated, no reasons), sets confidence to low without a graph, and caps it at medium when truncated. Caps are in `config.AGENT_*`: 120k tokens and 150 s per run, US$10 spend per process.
-- Left: rerun `python -m scripts.run_agent_sample --day 2022-09-14 --limit 20 --out <file>` (about US$1.5, 13 minutes) and record the rates as a new finding.
-
 **Step 4: Batch runner and `investigate()` (milestone 5), built**
-- `src/agent/batch.py` (`run_day` computes, `publish` saves), `store.py` (DynamoDB and S3), `investigate.py`, and `report.py`. CLIs: `scripts/run_batch.py --day <day> [--save]` (dry run unless `--save`), `create_agent_cases_table.py`, `rebuild_tables.py` (dry run unless `--yes`; refuses to delete outside `agent/tables/`, and fails if a day's ranks changed). Concurrency of 4, on a shared cache that is now thread-safe.
-- Checked: unit tests with in-memory stores, plus `publish` against the real tables with a fake day, `2099-01-01`: a rerun gave identical keys, a smaller rerun deleted exactly the stale rows, cleanup left nothing.
+- `src/agent/batch.py` (`run_day` computes, `publish` saves), `store.py` (DynamoDB and S3), `investigate.py`, and `report.py`. CLIs: `scripts/run_batch.py --day <day> [--save]` (dry run unless `--save`), `create_agent_cases_table.py`, `rebuild_tables.py` (dry run unless `--yes`; refuses to delete outside `agent/tables/`, and fails if a day's ranks changed). Concurrency of 4, on a shared cache that is thread-safe.
+- Checked with in-memory stores, and `publish` against the real tables with a fake day (`2099-01-01`): reruns replace exactly the day's rows.
 - Not done: `investigate()` has no save option (a save would overwrite the batch row for that alert). `rebuild_tables.py --yes` has not been run for real.
 
-**Step 5: Run the batch on 14-16 Sep**
-- 14 Sep ran under the old rules (F29), so rerun it, then run 15 and 16 Sep. About US$5.50 and 11 minutes a day. First confirm the Sonnet billing item in section 15.
-- Pass run IDs to Person 4, fix what the evaluation shows, and rerun. Reruns replace the day's rows.
-- Don't start step 6 until the results are saved.
+**Step 5: Investigation brief (D31)** — steps 2-7 in "Where to continue". Change `contracts.py`, `prompts.py`, `validate.py`, `claims.py`, `baseline.py`, `review_list.py` and `docs/agent_output_format.md`, and extend `tools.py`. Then do one 14 Sep dry run, freeze, and run 14-16 Sep with `--save`.
 
 **Step 6: New-day path (milestone 8)**
 - Rank `excluded` rows too (F22), and check that 14-16 Sep ranks stay identical.
 - Widen `sql/agent/04-06`, `AGENT_SCORED_DATES` and `AGENT_DATA_HORIZON`.
 - Consumer for `is459-etl-v2-day-ready`: rebuild, run the batch, delete the message only on success (F20).
 - Check that runs with no reasons still give valid output (F23). Test with a fake message.
-- Done when a test message starts the batch with no manual step.
+- Done when a test message starts the batch with no manual step. Don't start until the 14-16 Sep results are saved.
 
 **Step 7: Recordings (no live demo)**
 - Record the setup pipeline and the run pipeline.

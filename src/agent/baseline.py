@@ -1,12 +1,6 @@
-"""S1: the deterministic baseline and LLM fallback. Same tools, fixed rules (PLAN.md 8, D26).
-
-Rules, first match wins:
-1. raise: the case has at least the minimum number of high-ranked transactions. Those are its
-   members plus neighbours inside the day's top K.
-2. not_sure: anything else, including no payments to check, because no evidence is not evidence
-   of innocence.
-
-S1 has no rule for dont_raise, so only the LLM can move an alert down.
+"""Decides a case with fixed rules instead of the LLM, as a baseline to compare against and a
+fallback when the LLM fails. A case is raised if it has enough high-ranked transactions; otherwise
+it is not_sure.
 """
 
 import time

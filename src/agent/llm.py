@@ -1,6 +1,4 @@
-"""Model access for the agent loop: Bedrock Converse with tool calling.
-Tests use a fake ``AgentLLM`` instead, so they need no AWS.
-"""
+"""Connects the agent to the LLM on Amazon Bedrock, with tool calling and a cap on total spend."""
 
 import threading
 import time

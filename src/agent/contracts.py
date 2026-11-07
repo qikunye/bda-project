@@ -1,8 +1,4 @@
-"""Typed shapes of the agent tool outputs (PLAN.md 5.2, 18).
-
-Every output carries ``ids``: each transaction and account ID it shows. The decision validator
-(milestone 4) accepts only cited IDs that appear in some ``ids`` list from the same run.
-"""
+"""Defines the data shapes used across the agent: tool outputs, decisions and saved rows."""
 
 from typing import Literal, TypedDict
 

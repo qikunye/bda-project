@@ -1,5 +1,6 @@
-"""Checks the model's decision against what the tools returned in this run.
-It rejects made-up IDs and numbers, and sets caveats and confidence from the tool flags.
+"""Checks the LLM's decision against what the tools returned in the same run. It rejects made-up IDs,
+raises with no payments behind them and numbers in the note, and sets caveats and confidence from the
+tool flags.
 """
 
 import re
@@ -28,14 +29,13 @@ DECISION_FIELDS = frozenset(
     {"verdict", "confidence", "claims", "note"}
 )
 MAX_EVIDENCE_IDS_PER_CLAIM = 50
-
-_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
-
-
-def numbers_in(text: str) -> set[str]:
-    """Finds the numbers in a text, ignoring thousands commas ('12,345.6' becomes '12345.6')."""
-
-    return {match.replace(",", "") for match in _NUMBER.findall(text)}
+# "one" is left out because it is also an ordinary word, as in "one of the accounts".
+_NUMBER_WORD = re.compile(
+    r"\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+    r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
+    r"hundreds?|thousands?|millions?|billions?)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -54,14 +54,11 @@ class RunEvidence:
     neighbours: dict[str, NeighbourScore] = field(default_factory=dict)
     # One entry per get_related_alerts call. The model may call it for several case members.
     related_calls: list[RelatedAlerts] = field(default_factory=list)
-    # Digit runs in everything shown to the LLM, for the note check.
-    numbers: set[str] = field(default_factory=set)
 
-    def record(self, tool: str, result: Mapping, shown_text: str) -> None:
+    def record(self, tool: str, result: Mapping) -> None:
         """Stores one tool result that the model was shown."""
 
         self.known_ids.update(result.get("ids", ()))
-        self.numbers |= numbers_in(shown_text)
         if tool == "get_alert" and result.get("found"):
             self.alerts[result["txn_id"]] = result
             self.txn_dates[result["txn_id"]] = result["txn_date"]
@@ -291,6 +288,14 @@ def validate_decision(payload, evidence: RunEvidence) -> Validated:
             "dont_raise needs payments that fail to support the reasons, but the graphs fetched "
             "have none. Use not_sure, or fetch another case member's graph."
         )
+    # Also covers a raise with no graph fetched at all, so skipping the graph can't get around it.
+    if verdict == "raise" and all(
+        graph["no_graph"] for graph in evidence.graphs.values()
+    ):
+        errors.append(
+            "raise needs a graph with payments, but no graph fetched in this run has any. "
+            "Use not_sure."
+        )
 
     for claim in claims:
         problem = _grounding_error(claim, evidence)
@@ -301,17 +306,21 @@ def validate_decision(payload, evidence: RunEvidence) -> Validated:
             "REASONS_CORROBORATED and REASONS_NOT_SUPPORTED contradict each other."
         )
 
-    # 4. The note is short and holds no number the tools did not return.
+    # 4. The note is short and has no numbers, so every displayed number comes from the claims.
     if note is not None:
         if len(note) > config.AGENT_NOTE_MAX_CHARS:
             errors.append(
                 f"note is {len(note)} characters. The limit is {config.AGENT_NOTE_MAX_CHARS}."
             )
-        invented = sorted(numbers_in(note) - evidence.numbers)
-        if invented:
+        if any(character.isdigit() for character in note):
             errors.append(
-                f"note contains numbers that no tool result shows: {invented[:5]}. "
-                "Remove them, or write the note without numbers."
+                "note must not contain digits. Remove them, or leave the note out."
+            )
+        spelled = _NUMBER_WORD.search(note)
+        if spelled:
+            errors.append(
+                f"note must not spell out numbers, but it says {spelled.group()!r}. "
+                "Remove it, or leave the note out."
             )
 
     # 5. Caveat claims match the tool flags.

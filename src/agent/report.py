@@ -1,4 +1,4 @@
-"""Counts and prints how an LLM run behaved: outcome rates, tokens, cost and latency."""
+"""Summarises and prints how an LLM run behaved: outcome rates, tokens, cost and latency."""
 
 import statistics
 from collections import Counter

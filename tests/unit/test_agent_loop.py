@@ -193,11 +193,11 @@ def test_the_note_and_window_are_passed_through(monkeypatch):
     llm = ScriptedLLM(
         turn(("get_case_graph", {"txn_id": "txn_a", "window_h": 24})),
         turn(("get_neighbour_scores", {"txn_ids": ["txn_low", "txn_high"]})),
-        turn((SUBMIT, valid_payload(note="Chain of 15 minutes."))),
+        turn((SUBMIT, valid_payload(note="Money moves on quickly."))),
     )
     result = run_agent(None, llm, case_of("txn_a"))
     assert ("get_case_graph", "txn_a", 24) in calls
-    assert result["decision"]["note"] == "Chain of 15 minutes."
+    assert result["decision"]["note"] == "Money moves on quickly."
     assert result["decision"]["case_id"] is None  # A single alert has no case_id.
 
 

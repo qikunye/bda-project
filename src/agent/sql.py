@@ -1,8 +1,5 @@
-"""SQL builders for the agent tools.
-
-Every statement is built here from fixed column lists and validated inputs. The LLM never
-supplies SQL. Each builder runs its output through ``assert_label_free`` so a ground-truth
-column can never be requested, even by a future edit.
+"""Builds the SQL for the agent's tools from fixed column lists and validated inputs. Each statement
+is checked so it can never request a label column.
 """
 
 import re

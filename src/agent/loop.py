@@ -1,5 +1,5 @@
-"""Runs the LLM on one case: up to 5 tool steps, then a checked decision.
-If the decision stays invalid or a limit is hit, the S1 rules decide instead.
+"""Runs the LLM on one case: it calls tools for up to 5 steps, then submits a decision that gets
+checked. If the decision stays invalid or a limit is hit, the fixed rules decide instead.
 """
 
 import json
@@ -113,7 +113,7 @@ class _Run:
         """Records a result the model sees and returns the text to send."""
 
         text = _label_free(prompts.tool_result_view(result))
-        self.evidence.record(tool, result, text)
+        self.evidence.record(tool, result)
         return text
 
     # --- Seed and tool handlers
@@ -346,7 +346,7 @@ def run_agent(
         return _not_found(case, seed, settings.s1.window_h, run.trace)
     seed_text = prompts.seed_message(case, seed, window_h=settings.s1.window_h)
     _label_free(seed_text)
-    run.evidence.record("get_alert", seed, _label_free(prompts.tool_result_view(seed)))
+    run.evidence.record("get_alert", seed)
 
     _label_free(prompts.SYSTEM_PROMPT)
     _label_free(

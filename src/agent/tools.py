@@ -1,8 +1,5 @@
-"""The agent's read-only tools (PLAN.md 5.2, 18).
-
-Plain functions over an ``AgentData`` source. They return compact JSON-ready dicts, never the
-label, and list every transaction/account ID they show in ``ids``. Flags such as
-``window_truncated`` and ``no_graph`` are computed here, so the LLM cannot assert them falsely.
+"""The read-only tools the agent uses to look up alerts, money flows, neighbour scores and related
+alerts. They never return labels, and they list every ID they show so that citations can be checked.
 """
 
 from datetime import date, datetime, timedelta

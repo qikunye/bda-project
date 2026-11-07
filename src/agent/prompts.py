@@ -1,5 +1,5 @@
-"""The agent's instructions, tool definitions and the text shown to the model.
-None of it may name a ground-truth column.
+"""Holds the agent's instructions, tool definitions and the text shown to the LLM. None of it may
+name a label column.
 """
 
 import json
@@ -31,21 +31,29 @@ Rules
 - Cite only IDs that tool results returned. Code checks every ID and rejects the decision if one was \
 not returned.
 - Write no numbers of your own. Code builds the displayed explanation from your claim codes and the \
-tool results. The optional note is at most {config.AGENT_NOTE_MAX_CHARS} characters, and any number in it \
-must appear in a tool result. Leave the note out unless it adds something the claims cannot say.
+tool results. The optional note is at most {config.AGENT_NOTE_MAX_CHARS} characters and must contain no \
+digits or numbers spelled out as words, so keep amounts, counts, ranks, times and IDs out of it. Leave the note out unless it adds \
+something the claims cannot say.
 - Never add amounts across currencies.
 - You have at most {config.AGENT_MAX_STEPS} steps. A step is one reply of yours, and it may contain several \
 independent tool calls. Your last step must be {SUBMIT}. Usually: fetch the graph, then the neighbour \
 scores, then decide.
 
-How to decide (guidance, not hard rules)
+How to decide
 Your verdict says whether the analyst should look at this case today. Code already groups related \
-alerts, so you never merge anything.
-- raise: the case deserves an analyst's time. For example the payment graph supports the model's \
-reasons, or several neighbours also rank high (inside the day's top {config.AGENT_TOP_K}).
-- dont_raise: the case has payments to check, and they do not support the model's reasons.
-- not_sure: not enough evidence either way. Use this when there is no graph: a missing graph does not \
-show the alert is harmless, so say so with the matching claim code and keep your confidence low.
+alerts, so you never merge anything. Every alert here already ranks high, so a high rank and the model's \
+reasons are not enough on their own. Raise only the cases that stand out from the rest of the queue.
+- raise: a graph has payments, and they are consistent with the model's reasons or there are no reasons \
+to check, and the results also show at least one further signal: FAST_CHAIN, NEIGHBOURS_HIGH_RISK or \
+REPEAT_ACCOUNT_ALERTS. Code rejects a raise when no graph you fetched has payments.
+- dont_raise: a graph has payments, they do not support the model's reasons, and none of those further \
+signals appears. Claim REASONS_NOT_SUPPORTED. A truncated window does not change this: claim \
+TRUNCATED_WINDOW and still use dont_raise. This only moves the case down the list. It never removes the \
+case, so use it when the results point that way.
+- not_sure: anything else. That includes payments that fit the reasons with no further signal, mixed \
+signals, and no graph. A missing graph does not show the alert is harmless, and repeat alerts cannot make \
+up for it, so say so with the matching claim code and keep your confidence low.
+- If the representative's graph has no payments, fetch the other case members' graphs before deciding.
 - The graph shows only payments known when this review runs, so later ones may be unseen. Say so with \
 the matching claim code when window_truncated is true. That alone is no reason to avoid a verdict.
 
@@ -155,7 +163,7 @@ TOOLS: tuple[ToolDefinition, ...] = (
                 "note": {
                     "type": "string",
                     "maxLength": config.AGENT_NOTE_MAX_CHARS,
-                    "description": "Optional. No numbers except ones a tool result shows.",
+                    "description": "Optional. Must contain no digits or numbers spelled out as words.",
                 },
             },
             "required": ["verdict", "confidence", "claims"],
