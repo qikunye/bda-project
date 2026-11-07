@@ -1,7 +1,5 @@
-"""Made-up agent results, so Streamlit can be built before the agent exists (PLAN.md 19).
-
-Everything here is invented: the IDs, numbers and verdicts are not from the dataset, and the model
-is "sample". Do not use these in results or show them as real.
+"""Made-up agent results for building the Streamlit app without running the agent. Every ID, number
+and verdict is invented, so never present them as real.
 """
 
 from datetime import datetime, timedelta

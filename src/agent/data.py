@@ -1,7 +1,5 @@
-"""Athena access for the agent: one runner with a result cache, a scan log and a label check.
-
-Tools call ``AgentData.query``. Repeated statements are served from the cache, so reruns and
-repeated tool calls do not re-bill Athena (PLAN.md 5.2).
+"""Runs the agent's Athena queries, with a label check and a log of data scanned. Results are
+cached, so repeating a query costs nothing.
 """
 
 import threading

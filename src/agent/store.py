@@ -1,7 +1,5 @@
-"""Where the batch saves its results: two DynamoDB tables and S3 traces (PLAN.md 10).
-
-Both classes are thin wrappers over boto3, so tests can swap in an in-memory fake with the same
-methods. The agent writes nowhere else (rule 1).
+"""Saves batch results to two DynamoDB tables and run traces to S3. These are the only places the
+agent writes to.
 """
 
 import json

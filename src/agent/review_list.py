@@ -1,10 +1,5 @@
-"""Build the agent's review list from decision rows (PLAN.md 7.2, D26).
-
-It reads DecisionRow items, so S1, the LLM agent and DynamoDB all use the same code. Every alert in
-the queue stays in the list (rule 3). This only produces a second, reordered list.
-
-Order: raised cases, best representative first, each with its members. Then the remaining alerts by
-rank, including not_sure and any alert with no decision. Then dont_raise alerts by rank.
+"""Builds a reordered list for analysts: raised cases first, then other alerts by rank, then
+dont_raise alerts. Every alert stays in the list.
 """
 
 from typing import Literal, TypedDict

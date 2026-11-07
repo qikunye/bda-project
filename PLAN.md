@@ -2,7 +2,7 @@
 
 Owner: Claire (agent). Last updated 7 Nov 2026. Team split: `WORK_SPLIT.md` (deleted from the working folder but still in git: `git show HEAD:WORK_SPLIT.md`). ETL and real-time details: `ETL_v2_Handover.docx` (kept outside this repo).
 
-**Status:** the ETL and real-time pipelines are finished. Agent data access, the output format, S1, the LLM loop, the batch runner and `investigate()` are built, and 424 unit tests pass. The current rules (D27, D28) have only run on fake data in tests, not on AWS or the real LLM. The saved 14 Sep batch (F29) predates them, so its rows are out of date.
+**Status:** the ETL and real-time pipelines are finished. Agent data access, the output format, S1, the LLM loop, the batch runner and `investigate()` are built, and 427 unit tests pass. The current rules (D27-D30) have had a full dry run on 14 Sep (F33), but not a saved batch yet. The saved 14 Sep batch (F29) predates them, so its rows are out of date.
 
 ## Where to continue
 
@@ -12,7 +12,7 @@ Changes made on 7 Nov, in commit `451b0c8` on `feat/agent`: the use case is now 
 2. **Tell the team.** Person 2: the contract changed (`docs/agent_output_format.md`: new `members` field, no `promoted_txn_ids`). Person 4: the evaluation changed (section 13). Don't use the saved 14 Sep rows.
 3. **Check billing.** Confirm whether credits cover Sonnet (section 15).
 4. **Rerun the sample** (about US$1.50): `python -m scripts.run_agent_sample --day 2022-09-14 --limit 20 --out <file>`. Check the share of cases raised against F29's 92%, plus the valid, repair and fallback rates.
-5. **If it still raises nearly everything,** tighten the prompt in `src/agent/prompts.py`, so only stronger evidence raises a case, and rerun the sample.
+5. **Rules frozen (D30).** The last dry run raised 54% and still had no `dont_raise` (F33), so the evaluation compares raise with not_sure.
 6. **Run the batch** on 14, 15 and 16 Sep with `--save` (step 5 in section 19), and hand the run IDs to Person 4.
 7. **Then build the new-day path** (step 6), including the risks in section 15.
 
@@ -82,18 +82,18 @@ invalid after 1 repair, or no decision by step 5 → S1 decision, fallback=true
 
 Bedrock Converse with native tool calling, temperature 0. Log steps, tokens, latency and validation outcome.
 
-**6.2 Policy prompt (short):** triage assistant with read-only tools and no labels; decide only from tool results and cite IDs; write no numbers. Guide, not hard rules:
-Three verdicts (D27): `raise`, `dont_raise`, `not_sure`. Code groups related alerts, so there is no merge verdict.
-- Graph supports the reasons, or several neighbours rank high → `raise`.
-- Payments exist but don't support the reasons → `dont_raise`.
-- No graph, or not enough evidence either way → `not_sure`.
+**6.2 Policy prompt (short):** triage assistant with read-only tools and no labels; decide only from tool results and cite IDs; write no numbers. Guide (only the no-payments rule is enforced by code):
+Three verdicts (D27, D29): `raise`, `dont_raise`, `not_sure`. Code groups related alerts, so there is no merge verdict.
+- Payments that fit the reasons (or no reasons to check), plus a further signal (fast chain, high-ranked neighbours or repeat alerts) → `raise`.
+- Payments that don't support the reasons, and no further signal → `dont_raise`.
+- Anything else, including payments that fit the reasons with no further signal, mixed signals and no graph → `not_sure`.
 - Truncated window → say so. Truncation alone is no reason to avoid a verdict.
 
 **6.3 Output and validation:** the `Decision` type in `src/agent/contracts.py`. Code must check:
 1. The JSON matches the schema, and the verdict and claim codes are valid.
 2. Every `evidence_ids` member appears in a tool result's `ids` from this run. Code sets `case_id` (D25).
-3. `dont_raise` is rejected when every graph fetched has no payments.
-4. `note` is at most 200 characters, with digits only if they appear in tool results.
+3. `dont_raise` is rejected when every graph fetched has no payments. `raise` is rejected unless at least one graph fetched has payments.
+4. `note` is at most 200 characters, with no digits.
 5. `NO_GRAPH_AVAILABLE`, `TRUNCATED_WINDOW` and `NO_REASONS_AVAILABLE` match the tool flags.
 
 ## 7. Cases and review list (built)
@@ -213,6 +213,8 @@ Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say ful
 | D26 | S1 order is raise, not_sure. High-ranked = member or top-500 neighbour. No graph means low confidence. Truncation caps the LLM's confidence at medium. |
 | D27 | Verdicts are `raise`, `dont_raise`, `not_sure`. `merge_into_case`, `promote` and `promoted_txn_ids` are gone: code groups related alerts, and the agent judges only the top 100. No graph means `not_sure`. |
 | D28 | The batch and S1 see data only up to the end of the alert's day, because that is all a daily run knows. `investigate()` has no cutoff, because an analyst clicks later. |
+| D29 | Stricter LLM rules after F30. The validator rejects `raise` unless a fetched graph has payments, and rejects any digit in `note`. The prompt asks for a further signal beyond the reasons before raising. S1 is unchanged, so a fallback can still raise a case with no graph. After F32, the prompt also says payments with no support and no further signal mean `dont_raise` even when truncated, and the validator rejects spelled-out numbers from "two" up. |
+| D30 | Rules frozen after F33, before anyone looked at labels. The 14-16 Sep batch runs from the freeze commit. Later changes based on labels are reported separately, as tuned after the results. |
 
 - **F27** (superseded by F29) LLM sample, 20 cases on 14 Sep, Sonnet 4.5, run once with a validator bug: 12 valid, 6 repaired, 2 fallback. About 17k tokens in, 1.5k out and 38 s per run, about US$0.075 per run (list price). The bug kept only the last `get_related_alerts` call, so correct citations were rejected and both fallbacks followed. It is fixed and tested, but not rerun, so these rates are too pessimistic. Verdicts: merge_into_case 16, escalate 3, deprioritise 1, promote 0. Confidence high in 13 (14 Sep has complete graphs). Saved in a temporary folder, so it may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/b2eb27de-ce80-4d1d-a2a6-7d6b874c44b8/scratchpad/sample_20.json`.
 
@@ -220,13 +222,21 @@ Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say ful
 
 - **F29** 14 Sep batch, run `batch-2022-09-14-20261107T034826Z`, saved to DynamoDB and S3 (100 decision rows: 78 representatives and 22 members; 78 case rows; 78 traces; no collisions). 78 cases, 0 errored. Valid 66 (85%), repaired 12 (15%), fallback 0, so the F27 validator fix worked. About 16k tokens in and 1.4k out per run, 34 s per run, 11 minutes, US$5.43 estimated, 5.5 GB Athena. Verdicts: merge_into_case 54, escalate 18, deprioritise 3, need_more 3, promote 0, so 72 of 78 cases (92%) move up. Merge was used for 37 of the 58 single-alert cases, where nothing can be merged, so the label carries little. Only 7 cases had a neighbour ranked 501-5000, the rest were far lower (median about 977,000), and none was promoted. S1 promotes in that band. Old verdict names (D27). The saved 14 Sep rows still use them and could see later days, so rerun 14 Sep before Person 4 uses them. Local copy, in a temporary folder that may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/b2eb27de-ce80-4d1d-a2a6-7d6b874c44b8/scratchpad/batch_0914.json`.
 
+- **F30** LLM sample under D27 and D28, top 20 cases on 14 Sep, Sonnet 4.5, not saved to DynamoDB. Valid 14, repaired 6, fallback 0, errors 0. Verdicts: raise 16 (80%), not_sure 4, dont_raise 0. Confidence: medium 13, low 7. All 13 cases with a graph were raised, so the agent doesn't filter them. 7 cases had no graph: 4 not_sure and 3 raise, which goes against D27 because the validator doesn't enforce it. All 6 repairs were for numbers in `note`. The check can also miss computed numbers: "57% of alert amount" passed, though 57 appears in the tool results only in the timestamp 10:57:00 and inside IDs. About 14k tokens in, 1.3k out and 31 s per run, US$1.23 estimated (US$0.06 per run), 0.62 GB Athena. Not directly comparable with F29's 92%, which covered all 78 cases. Local copy, in a temporary folder that may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/77926439-18a2-424e-a652-47c5a6dabd0a/scratchpad/sample_20_d27.json`.
+
+- **F31** Same 20 cases as F30 under D29, not saved to DynamoDB. Valid 20, repaired 0, fallback 0, errors 0. Verdicts: raise 12 (60%), not_sure 8, dont_raise 0. Confidence: medium 12, low 8. 4 cases moved from raise to not_sure: the 3 no-graph raises and the one with only matching reasons. No case moved up. All 7 no-graph cases are now not_sure, and 12 of the 13 with a graph were raised, so having a graph still nearly decides the verdict. Some notes now spell numbers as words ("Five top alerts"), which the digit check can't catch. About 11.5k tokens in, 1.1k out and 29 s per run, US$1.03 estimated (US$0.05 per run), 0.60 GB Athena. These are the day's 20 best-ranked cases, so a full day may raise a different share. Local copy, in a temporary folder that may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/77926439-18a2-424e-a652-47c5a6dabd0a/scratchpad/sample_20_d29.json`.
+
+- **F32** Full 14 Sep dry run under D29 plus the number-words prompt line, run `batch-2022-09-14-20261107T051741Z`, not saved to DynamoDB or S3. 78 cases (100 alerts), 0 errored. Valid 78, repaired 0, fallback 0. Verdicts: raise 42 (54%), not_sure 36, dont_raise 0. By case order, raised: 1-20 12 of 20, 21-40 10 of 20, 41-60 10 of 20, 61+ 10 of 18, so rank within the top 100 barely changes the rate. All 42 raises have a graph and a further signal: fast chain only 13, repeat alerts only 10, both 11, those plus neighbours 8. The 18 no-graph cases are all not_sure, as are 18 cases with a graph. 6 of those 18 claim no support and no signal, so they fit `dont_raise` but the LLM held back, citing truncation. 1 (`042fbcf119`) claims matching reasons and a fast chain but is not_sure, against the prompt. Closest payment cited for 32 fast-chain raises: median about 4 h, longest about 13 h. Some notes still spell out numbers ("four top alerts"). US$3.86 estimated (US$0.05 per run), 2.04 GB Athena. Local copy, in a temporary folder that may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/77926439-18a2-424e-a652-47c5a6dabd0a/scratchpad/batch_0914_dry.json`.
+
+- **F33** Final 14 Sep dry run before the freeze, with the `dont_raise` prompt line and the number-word check, run `batch-2022-09-14-20261107T053021Z`, not saved. 78 cases, 0 errored. Valid 72, repaired 6, fallback 0. 5 repairs were number words ("two") and 1 a wrong NO_GRAPH_AVAILABLE claim. No digits or number words reached a saved note. Verdicts: raise 42, not_sure 36, dont_raise 0, the same counts as F32. 4 cases changed verdict (2 each way). The prompt line did not produce `dont_raise`: for the cases that used to claim no support, the LLM now claims REASONS_CORROBORATED and picks not_sure. 18 cases have a graph but no further signal, and all are not_sure. Raised by case order: 12 of 20, 10 of 20, 11 of 20, 9 of 18. US$4.12 estimated, 2.06 GB Athena. Local copy, in a temporary folder that may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/77926439-18a2-424e-a652-47c5a6dabd0a/scratchpad/batch_0914_dry2.json`.
+
 ## 18. Data access (built)
 
 `src/agent/`: `sql.py` (builders, allowlist, label guard), `data.py` (runner, cache, scan log), `tools.py`, `contracts.py`. Three test alerts scanned 224 MB in total, at most 105 MB per call, and edges match the BQ2 query at 6, 48 and 72 h.
 
 ## 19. Remaining agent work (Claire)
 
-Steps 1-4 are built and tested (424 tests). File names for later steps are proposals.
+Steps 1-4 are built and tested (427 tests). File names for later steps are proposals.
 
 **Step 3: LLM loop and validator (milestone 4), built**
 - Files: `llm.py`, `prompts.py`, `validate.py`, `loop.py`, and `scripts/run_agent_sample.py` for the sample run.

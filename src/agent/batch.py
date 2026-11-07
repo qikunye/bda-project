@@ -1,8 +1,5 @@
-"""Triage one day's top alerts as cases and save the results (PLAN.md 4, 10, 19 step 4).
-
-``run_day`` does the work and touches no storage. ``publish`` saves it, so a rerun replaces the
-day's rows instead of adding to them. Splitting them lets the CLI do a dry run, and lets tests
-use an in-memory store.
+"""Runs the agent on a day's top alerts, grouped into cases, and saves the results. A rerun replaces
+that day's saved rows instead of adding to them.
 """
 
 from concurrent.futures import ThreadPoolExecutor

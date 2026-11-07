@@ -1,4 +1,4 @@
-"""Build is459_agent_decisions rows from one agent result."""
+"""Converts one agent result into the decision and case rows that get saved."""
 
 from src.agent.cases import Case
 from src.agent.contracts import CaseRow, DecisionRow, InvestigateResult, Trigger

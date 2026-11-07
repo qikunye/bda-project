@@ -1,8 +1,10 @@
 import pytest
 
 from src import config
-from src.agent.validate import numbers_in, validate_decision
+from src.agent.validate import RunEvidence, validate_decision
 from tests.unit.agent_loop_fixtures import (
+    alert_result,
+    graph_result,
     make_evidence,
     related_result,
     valid_payload,
@@ -117,6 +119,34 @@ def test_dont_raise_is_accepted_when_a_graph_has_payments():
     assert validate_decision(payload, make_evidence()).ok
 
 
+def test_raise_is_rejected_when_no_graph_has_payments():
+    evidence = make_evidence(downstream=(), ranks={})
+    payload = valid_payload(verdict="raise", claims=[])
+    assert "raise needs a graph with payments" in errors_of(payload, evidence)
+
+
+def test_raise_is_rejected_when_no_graph_was_fetched():
+    evidence = RunEvidence(representative="txn_a", members=("txn_a",))
+    evidence.record("get_alert", alert_result("txn_a"))
+    payload = valid_payload(verdict="raise", claims=[])
+    assert "raise needs a graph with payments" in errors_of(payload, evidence)
+
+
+def test_raise_is_accepted_when_another_members_graph_has_payments():
+    evidence = make_evidence(("txn_a", "txn_b"), downstream=(), ranks={})
+    evidence.record("get_case_graph", graph_result("txn_b", ("txn_low",)))
+    result = validate_decision(valid_payload(verdict="raise", claims=[]), evidence)
+    assert result.ok
+    # The representative's own graph is still empty, so the caveat and low confidence stay.
+    assert [c["code"] for c in result.decision["claims"]] == ["NO_GRAPH_AVAILABLE"]
+    assert result.decision["confidence"] == "low"
+
+
+def test_not_sure_is_accepted_when_no_graph_has_payments():
+    evidence = make_evidence(downstream=(), ranks={})
+    assert validate_decision(valid_payload(verdict="not_sure", claims=[]), evidence).ok
+
+
 def test_the_old_verdict_names_are_rejected():
     for old in ("escalate", "merge_into_case", "promote", "deprioritise", "need_more"):
         assert "verdict must be one of" in errors_of(valid_payload(verdict=old))
@@ -190,30 +220,37 @@ def test_a_blank_note_becomes_null():
     )
 
 
-def test_a_note_number_must_appear_in_a_tool_result():
-    evidence = make_evidence()
-    evidence.numbers = {"15", "900"}
-    assert validate_decision(valid_payload(note="Gap of 15 minutes."), evidence).ok
-    assert "777" in errors_of(valid_payload(note="About 777 transfers."), evidence)
+@pytest.mark.parametrize(
+    "note",
+    ["Gap of 15 minutes.", "57% of the alert amount.", "Paid at 10:57.", "txn_a0f7 again."],
+)
+def test_a_note_with_digits_is_rejected(note):
+    assert "must not contain digits" in errors_of(valid_payload(note=note))
 
 
-def test_a_note_without_numbers_needs_no_numbers_in_the_evidence():
-    evidence = make_evidence()
-    evidence.numbers = set()
-    assert validate_decision(valid_payload(note="Chain looks fast."), evidence).ok
+def test_a_note_without_digits_is_accepted():
+    assert validate_decision(valid_payload(note="Chain looks fast."), make_evidence()).ok
 
 
 @pytest.mark.parametrize(
-    "text, expected",
+    "note",
+    ["Same sender in four top alerts.", "Two alerts form a chain.", "Fifteen payments.", "Within three hours."],
+)
+def test_a_note_with_a_spelled_out_number_is_rejected(note):
+    assert "must not spell out numbers" in errors_of(valid_payload(note=note))
+
+
+@pytest.mark.parametrize(
+    "note",
     [
-        ("12,345.60 paid", {"12345.60"}),
-        ("rank 2 of 15", {"2", "15"}),
-        ("txn_a0f7 is 3.5.", {"0", "7", "3.5"}),
-        ("no digits", set()),
+        "One of the accounts repeats.",
+        "Multiple payments, often within hours.",
+        "Someone's network looks tense and often stone-like.",
+        "A canteen payment.",
     ],
 )
-def test_numbers_in(text, expected):
-    assert numbers_in(text) == expected
+def test_ordinary_words_are_not_mistaken_for_numbers(note):
+    assert validate_decision(valid_payload(note=note), make_evidence()).ok
 
 
 # --- Check 5: caveat claims match the flags
@@ -293,7 +330,7 @@ def test_no_caveat_is_added_for_a_graph_that_was_never_fetched():
 
 def test_alerts_from_every_related_alerts_call_can_be_cited():
     evidence = make_evidence(("txn_a", "txn_b"), related=related_result("txn_x"))
-    evidence.record("get_related_alerts", related_result("txn_y"), "{}")
+    evidence.record("get_related_alerts", related_result("txn_y"))
     claims = [{"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_x", "txn_y"]}]
     payload = valid_payload(verdict="raise", claims=claims)
     assert validate_decision(payload, evidence).ok

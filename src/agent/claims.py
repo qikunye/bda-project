@@ -1,7 +1,5 @@
-"""Turn claim codes into display sentences using tool results (PLAN.md 6.3).
-
-The LLM picks a claim code and cites IDs. Every number shown here comes from a tool result, so
-the LLM never writes a displayed number. If a tool did not run, the sentence has no numbers.
+"""Turns the claim codes picked by the LLM into sentences for display. Every number in those
+sentences comes from a tool result, never from the LLM.
 """
 
 from collections.abc import Callable, Iterable

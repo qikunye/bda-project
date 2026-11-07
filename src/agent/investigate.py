@@ -1,8 +1,5 @@
-"""The Investigate button: run the agent on one alert and return the result (PLAN.md 4, D25).
-
-It saves nothing, so it never overwrites the batch's rows for the same alert. Unlike the batch it
-has no end-of-day cutoff: an analyst clicks later, so it sees all the data there is by then, and its
-verdict can differ from the batch's.
+"""Runs the agent on one alert when an analyst clicks Investigate, and returns the result without
+saving it. It has no end-of-day cutoff, so its verdict can differ from the batch's.
 """
 
 import threading
