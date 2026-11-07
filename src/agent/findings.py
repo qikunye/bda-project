@@ -71,7 +71,7 @@ def _pass_through(evidence: RunEvidence) -> list[Instance]:
     found: list[Instance] = []
     for graph in evidence.graphs_in_case_order():
         for currency, flow in graph["flow"].items():
-            gap, share = flow["fastest_onward_gap_minutes"], flow["onward_share"]
+            gap, share = flow["fastest_onward_gap_minutes"], flow["quick_onward_share"]
             down_id = flow["fastest_onward_txn_id"]
             if gap is None or share is None or down_id is None:
                 continue

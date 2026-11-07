@@ -403,7 +403,7 @@ def test_returned_to_source_is_limited():
     assert len(graph["returned_to_source"]) == config.AGENT_MAX_RETURNED_TO_SOURCE
 
 
-def test_flow_reports_onward_share_of_the_alert_amount_and_gaps_per_currency():
+def test_flow_reports_quick_onward_share_of_the_alert_amount_and_gaps_per_currency():
     # The alert is 1,500.25 US Dollar.
     graph = get_graph(
         [
@@ -418,28 +418,28 @@ def test_flow_reports_onward_share_of_the_alert_amount_and_gaps_per_currency():
     assert graph["flow"]["US Dollar"] == {
         "upstream_total": 1000.0,
         "downstream_total": 1500.0,
-        "onward_share": 1.0,  # 1,500 of the 1,500.25 alert, whatever the sender took in.
+        "quick_onward_share": 1.0,  # 1,500 of the 1,500.25 alert, whatever the sender took in.
         "fastest_onward_gap_minutes": 15,
         "median_onward_gap_minutes": 45.0,
         "fastest_onward_txn_id": "txn_d1",
     }
     # Euro came in, but the alert is in dollars, so there is no share to compute.
-    assert graph["flow"]["Euro"]["onward_share"] is None
+    assert graph["flow"]["Euro"]["quick_onward_share"] is None
     assert graph["flow"]["Euro"]["fastest_onward_gap_minutes"] is None
     assert graph["flow"]["Euro"]["fastest_onward_txn_id"] is None
     assert "txn_d1" in graph["ids"]
 
 
-def test_onward_share_does_not_depend_on_what_the_sender_took_in():
+def test_quick_onward_share_does_not_depend_on_what_the_sender_took_in():
     onward = edge("DOWNSTREAM", "txn_d1", RECEIVER, "40|E", 15, amount="750.125000")
     small = get_graph([edge("UPSTREAM", "txn_u1", "30|C", SENDER, 60, amount="10.000000"), onward])
     huge = get_graph([edge("UPSTREAM", "txn_u1", "30|C", SENDER, 60, amount="9000000.000000"), onward])
     none = get_graph([onward])
-    shares = [g["flow"]["US Dollar"]["onward_share"] for g in (small, huge, none)]
+    shares = [g["flow"]["US Dollar"]["quick_onward_share"] for g in (small, huge, none)]
     assert shares == [0.5, 0.5, 0.5]
 
 
-def test_onward_share_counts_only_payments_within_the_pass_through_gap():
+def test_quick_onward_share_counts_only_payments_within_the_pass_through_gap():
     # The alert is 1,500.25 US Dollar. A small quick payment, then a large one much later.
     limit = config.AGENT_PASS_THROUGH_MAX_GAP_MIN
     graph = get_graph(
@@ -450,19 +450,19 @@ def test_onward_share_counts_only_payments_within_the_pass_through_gap():
         ]
     )
     flow = graph["flow"]["US Dollar"]
-    assert flow["onward_share"] == 0.2  # 300.05 of 1,500.25; the later 5,000 does not count.
+    assert flow["quick_onward_share"] == 0.2  # 300.05 of 1,500.25; the later 5,000 does not count.
     assert flow["downstream_total"] == 5300.05  # Totals still cover the whole window.
     assert flow["fastest_onward_txn_id"] == "txn_d1"
 
 
-def test_onward_share_is_zero_when_nothing_went_on_within_the_gap():
+def test_quick_onward_share_is_zero_when_nothing_went_on_within_the_gap():
     late = config.AGENT_PASS_THROUGH_MAX_GAP_MIN + 60
     graph = get_graph([edge("DOWNSTREAM", "txn_d1", RECEIVER, "40|E", late, amount="1500.250000")])
-    assert graph["flow"]["US Dollar"]["onward_share"] == 0.0
+    assert graph["flow"]["US Dollar"]["quick_onward_share"] == 0.0
     assert graph["flow"]["US Dollar"]["fastest_onward_gap_minutes"] == late
 
 
-def test_onward_share_is_null_when_the_alert_has_no_amount():
+def test_quick_onward_share_is_null_when_the_alert_has_no_amount():
     alert_row = alert_frame()
     alert_row["amount_paid"] = None
     data, _ = data_for(
@@ -471,7 +471,7 @@ def test_onward_share_is_null_when_the_alert_has_no_amount():
     )
     alert = tools.get_alert(data, ALERT_ID, "2022-09-14")
     graph = tools.get_case_graph(data, alert, 48)
-    assert graph["flow"]["US Dollar"]["onward_share"] is None
+    assert graph["flow"]["US Dollar"]["quick_onward_share"] is None
     assert graph["flow"]["US Dollar"]["fastest_onward_gap_minutes"] == 15
 
 

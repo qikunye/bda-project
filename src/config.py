@@ -40,16 +40,19 @@ AGENT_BATCH_TOP_N = 100
 AGENT_MAX_CASE_SIZE = 20
 AGENT_S1_MAX_EVIDENCE = 10  # IDs the code-only brief cites per finding.
 
-# Finding and gap thresholds. PLACEHOLDERS: set them from label-free distributions
-# of the 14-16 Sep top alerts and of ordinary accounts, then commit them before any label is read.
-# Do not tune them on results. Change one only with a note saying why and when.
-AGENT_PASS_THROUGH_MAX_GAP_MIN = 360  # PASS_THROUGH: first onward payment within this many minutes.
-AGENT_PASS_THROUGH_MIN_ONWARD_SHARE = 0.5  # ...and onward payments within that time of at least this share of the alert amount.
-AGENT_FAN_MIN_COUNTERPARTIES = 5  # FAN_OUT / FAN_IN: distinct counterparties in the window.
-AGENT_NEIGHBOURS_HIGH_MIN = 1  # NEIGHBOURS_HIGH_RISK: neighbours in the day's top K.
-AGENT_MIN_HISTORY_DAYS = 2  # Below this, SHORT_HISTORY.
+# Finding and gap thresholds. Set on 7 Nov 2026 from label-free distributions (no label read) of 690
+# alerts on 14-16 Sep: the top 100 of each day (300), ranks 101-5,000 (183) and ordinary alerts (207).
+# Commit them before any label is read. Do not tune them on results. Change one only with a note saying
+# why and when. PASS_THROUGH needs an upstream payment in the alert's own currency, and in this data it
+# does not separate top alerts from ordinary ones (13% of the top 100 and 15% of ordinary alerts meet the
+# share rule within the gap), so judge it in the evaluation.
+AGENT_PASS_THROUGH_MAX_GAP_MIN = 360  # PASS_THROUGH: first onward payment within this many minutes. About the 70th percentile of fastest onward gaps among alerts that have one (median 3-4 h).
+AGENT_PASS_THROUGH_MIN_ONWARD_SHARE = 0.5  # ...and onward payments within that time of at least this share of the alert amount. At least half; 13% of top-100 alerts meet it within the gap.
+AGENT_FAN_MIN_COUNTERPARTIES = 5  # FAN_OUT / FAN_IN: distinct counterparties in the window. Above the 99th percentile of ordinary receivers (4); met by 18% of top-100 senders and 13% of receivers.
+AGENT_NEIGHBOURS_HIGH_MIN = 1  # NEIGHBOURS_HIGH_RISK: neighbours in the day's top K. Any one; fired on 8% of cases in the S1 run.
+AGENT_MIN_HISTORY_DAYS = 2  # Below this, SHORT_HISTORY. Every sampled account has 3-5 days, so it does not fire; kept as a guard.
 # Below this many hours of data after the alert, "no onward payment" says nothing (SHORT_OBSERVATION).
-# Keep it equal to the PASS_THROUGH gap in hours.
+# Keep it equal to the PASS_THROUGH gap in hours. 15% of top-100 alerts fall below it (end-of-day cutoff).
 AGENT_MIN_HOURS_OBSERVED = AGENT_PASS_THROUGH_MAX_GAP_MIN / 60
 AGENT_MAX_EVIDENCE_IDS = 50  # IDs one finding may cite.
 

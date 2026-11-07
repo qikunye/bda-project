@@ -19,7 +19,7 @@ _NEXT_CHECK_HELP = "\n".join(
     for code in NEXT_CHECK_CODES
 )
 _GAP_HELP = f"""\
-  - NO_GRAPH_AVAILABLE: the representative's get_case_graph has no_graph true.
+  - NO_GRAPH_AVAILABLE: the representative's get_case_graph has no_graph true (no payments into the sender or out of the receiver; the accounts may still have other activity).
   - TRUNCATED_WINDOW: a graph or activity result has window_truncated true (the window runs past the \
 end of the dataset).
   - SHORT_OBSERVATION: hours_observed_after_alert is below {config.AGENT_MIN_HOURS_OBSERVED:g}.
@@ -47,7 +47,10 @@ Rules
 the brief if a finding is not supported or an ID was not returned.
 - Write no numbers of your own. Code builds every displayed sentence, the money flow and the gaps from \
 tool results. Your summary is one short sentence of at most {config.AGENT_SUMMARY_MAX_CHARS} characters \
-with no digits and no numbers spelled out as words, so keep amounts, counts, ranks, times and IDs out of it.
+with no digits and no numbers spelled out as words, so keep amounts, counts, ranks, times and IDs out of it. \
+This applies to every piece of text you write, and the words "two", "three", "four" and so on up to \
+"hundred" and "thousand" are all refused. Write "both", "a pair of", "several", "many" or "a few" instead, \
+or name the accounts by ID.
 - Never add amounts across currencies.
 - You have at most {config.AGENT_MAX_STEPS} steps. A step is one reply of yours, and it may contain \
 several independent tool calls. Your last step must be {SUBMIT}.
@@ -66,6 +69,11 @@ SHORT_HISTORY).
 - next_checks: what the analyst should look at next. Pick only ones that fit your findings or the gaps \
 above.
 {_NEXT_CHECK_HELP}
+  Code rejects a next check that has none of its listed findings or gaps. Wanting more data is not \
+enough for RECHECK_AFTER_MORE_DATA: use it only when hours_observed_after_alert is below \
+{config.AGENT_MIN_HOURS_OBSERVED:g} (SHORT_OBSERVATION) or a result has window_truncated true \
+(TRUNCATED_WINDOW). Otherwise leave it out. The same goes for every other next check: pick it only \
+when one of its listed findings or gaps applies.
 - summary: one short sentence that sums up the evidence and says nothing the findings do not.
 - observations: up to {config.AGENT_MAX_OBSERVATIONS} short remarks of your own about what the results \
 show beyond the findings, such as how payments or accounts relate to each other or something odd in the \
@@ -77,7 +85,8 @@ before: the earlier history is too short to show that. Each is at most \
 {config.AGENT_OBSERVATION_MAX_CHARS} characters, with no digits, no numbers spelled out as words, and no \
 accusation or verdict (words such as laundering, fraud, illicit, criminal, suspicious and mule are not \
 allowed). An observation that breaks these rules is dropped without telling you, so the brief still \
-counts. Leave the list empty if you have nothing to add.
+counts. Check every observation for a spelled-out number before you submit it, because that is the \
+most common reason one is dropped. Leave the list empty if you have nothing to add.
 - Do not write gaps, money flow or case_id in the brief. Code adds them.
 """
 

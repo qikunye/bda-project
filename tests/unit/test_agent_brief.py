@@ -178,7 +178,7 @@ def test_money_flow_comes_from_the_graph():
             "hours_observed_after_alert": 48.0,
         }
     ]
-    assert flow[0]["per_currency"]["US Dollar"]["onward_share"] == 0.8
+    assert flow[0]["per_currency"]["US Dollar"]["quick_onward_share"] == 0.8
 
 
 def test_template_summary_names_each_finding_and_has_no_numbers():

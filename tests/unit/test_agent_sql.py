@@ -158,3 +158,29 @@ def test_account_history_query_stops_before_the_alert_day():
     statement = " ".join(sql.build_account_history_query(SENDER, TS).split())
     assert "txn_date BETWEEN DATE '2022-09-11' AND DATE '2022-09-13'" in statement
     assert "GROUP BY txn_date, direction, payment_currency" in statement
+
+
+def test_athena_runner_retries_an_internal_error_but_not_other_failures(monkeypatch):
+    from src.agent import data as agent_data
+    from src.aws.athena import AthenaQueryError
+
+    outcomes = [AthenaQueryError("Athena experienced an internal error"), ("frame", "stats")]
+    calls = []
+
+    def fake(client, **kwargs):
+        calls.append(kwargs["query"])
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(agent_data, "execute_query_with_stats", fake)
+    run = agent_data.athena_runner(client=object(), sleep=lambda s: None)
+    assert run("SELECT 1") == ("frame", "stats") and len(calls) == 2
+
+    def syntax_error(client, **kwargs):
+        raise AthenaQueryError("SYNTAX_ERROR: line 1")
+
+    monkeypatch.setattr(agent_data, "execute_query_with_stats", syntax_error)
+    with pytest.raises(AthenaQueryError):
+        agent_data.athena_runner(client=object(), sleep=lambda s: None)("SELECT bad")

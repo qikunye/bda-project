@@ -165,6 +165,14 @@ def test_brief_case_runs_the_activity_tool_for_both_sides_of_every_member(monkey
     ]
 
 
+def test_s1_scores_payments_listed_by_account_activity_as_well_as_the_graph(monkeypatch):
+    calls = stub_tools(monkeypatch, fan=3)
+    baseline.brief_case(None, case_of("txn_a"))
+    scored = next(c for c in calls if c[0] == "get_neighbour_scores")[1]
+    assert {"txn_so1", "txn_so2", "txn_so3"} <= set(scored)  # Sender's outgoing payments.
+    assert {"txn_low", "txn_high"} <= set(scored)  # Graph payments still included.
+
+
 def test_every_finding_s1_makes_passes_the_validator(monkeypatch):
     stub_tools(monkeypatch, fan=6)
     result = baseline.brief_case(None, case_of("txn_a", "txn_b"))

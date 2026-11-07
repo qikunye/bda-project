@@ -74,7 +74,7 @@ def test_a_valid_run_returns_the_standard_result(monkeypatch):
     # The model never fetched account activity, so code says the history was not checked.
     assert [g["code"] for g in result["gaps"]] == ["SHORT_HISTORY"]
     assert [m["txn_id"] for m in result["money_flow"]] == ["txn_a", "txn_b"]
-    assert result["money_flow"][0]["per_currency"]["US Dollar"]["onward_share"] == 0.8
+    assert result["money_flow"][0]["per_currency"]["US Dollar"]["quick_onward_share"] == 0.8
     assert "decision" not in result and "rendered_claims" not in result
     json.dumps(result)
 
