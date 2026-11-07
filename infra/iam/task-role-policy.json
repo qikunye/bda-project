@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid": "AthenaQueries", "Effect": "Allow",
+     "Action": ["athena:StartQueryExecution","athena:GetQueryExecution","athena:GetQueryResults","athena:StopQueryExecution","athena:GetWorkGroup"],
+     "Resource": "*"},
+    {"Sid": "GlueCatalogRead", "Effect": "Allow",
+     "Action": ["glue:GetDatabase","glue:GetDatabases","glue:GetTable","glue:GetTables","glue:GetPartition","glue:GetPartitions"],
+     "Resource": "*"},
+    {"Sid": "AgentDataReadOnly", "Effect": "Allow",
+     "Action": ["s3:GetObject"],
+     "Resource": ["arn:aws:s3:::is459-aml-g1t5/agent/tables/*"]},
+    {"Sid": "AthenaResultsAndTraces", "Effect": "Allow",
+     "Action": ["s3:GetObject","s3:PutObject","s3:AbortMultipartUpload"],
+     "Resource": ["arn:aws:s3:::is459-aml-g1t5/athena-results/agent/*","arn:aws:s3:::is459-aml-g1t5/agent/traces/*"]},
+    {"Sid": "BucketList", "Effect": "Allow",
+     "Action": ["s3:ListBucket","s3:GetBucketLocation"],
+     "Resource": "arn:aws:s3:::is459-aml-g1t5"},
+    {"Sid": "OwnTablesOnly", "Effect": "Allow",
+     "Action": ["dynamodb:DescribeTable","dynamodb:GetItem","dynamodb:PutItem","dynamodb:BatchWriteItem","dynamodb:DeleteItem","dynamodb:Query","dynamodb:Scan"],
+     "Resource": ["arn:aws:dynamodb:us-east-1:__ACCOUNT_ID__:table/is459_agent_decisions","arn:aws:dynamodb:us-east-1:__ACCOUNT_ID__:table/is459_agent_decisions/index/*","arn:aws:dynamodb:us-east-1:__ACCOUNT_ID__:table/is459_agent_cases","arn:aws:dynamodb:us-east-1:__ACCOUNT_ID__:table/is459_agent_cases/index/*"]},
+    {"Sid": "Claude", "Effect": "Allow",
+     "Action": ["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],
+     "Resource": ["arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0","arn:aws:bedrock:us-east-1:__ACCOUNT_ID__:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0"]}
+  ]
+}

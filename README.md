@@ -29,7 +29,7 @@ REAL-TIME  Kinesis → Lambda is459-rt-scorer (same BQ1 model)
              Display only: it doesn't go through the agent.
 ```
 
-The automatic link from the SQS message to the agent isn't built yet, so the batch is currently started by hand. See [Status](#status).
+When the ETL succeeds, an EventBridge rule starts a Step Functions state machine that runs the batch on Fargate (see `infra/`). It works for the three test days; new days also need the agent tables rebuilt first. See [Status](#status).
 
 ## BQ1: alert prioritisation
 
@@ -95,7 +95,7 @@ The finding thresholds in `src/config.py` were set from label-free distributions
 | Agent batch on 14-16 Sep | To do after the freeze commit |
 | Agent evaluation | Harness written (`src/evaluation/`, [instructions](docs/evaluation.md)); to run after the batch |
 | Agent screens in Streamlit | Not started |
-| Automatic trigger from the SQS message | To do |
+| Automatic trigger (EventBridge, Step Functions, Fargate) | Deployed and tested on 14 Sep; new days need the table rebuild step |
 
 ## What's in this repository
 
@@ -110,6 +110,7 @@ This repository holds the investigation agent and the serving code around BQ1 an
 | `src/aws/athena.py` | Athena execution |
 | `sql/bq1/` | Ready-made BQ1 queries |
 | `sql/agent/` | Builds the label-free agent tables |
+| `infra/` | Deploys the Fargate batch and its trigger (Dockerfile, state machine, IAM, `deploy.sh`) |
 | `src/evaluation/` | Evaluation: the only code that reads labels (the agent never imports it) |
 | `scripts/` | Run the batch, baseline, sample and evaluation, and rebuild tables |
 | `evaluate_bq2*.py` and CSVs | BQ2 window evaluation |

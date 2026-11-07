@@ -12,7 +12,7 @@ from src import config
 from src.agent.batch import BatchIncomplete, publish, run_day
 from src.agent.data import AgentData, athena_runner
 from src.agent.llm import SpendGuard, create_agent_llm
-from src.agent.report import print_summary, summarise_runs
+from src.agent.report import fallback_reason, print_summary, summarise_runs
 from src.agent.store import DynamoStore, S3TraceStore
 
 
@@ -30,6 +30,20 @@ def check_tables_exist() -> None:
             )
 
 
+def llm_failures(runs) -> list[str]:
+    """Case IDs whose brief is a fallback because the LLM could not be used at all (a failed call, such
+    as a daily token quota, or the spend cap), not because the model wrote an invalid brief."""
+
+    bad = []
+    for case, result in runs:
+        if result.get("status") != "ok" or not result["stats"]["fallback"]:
+            continue
+        reason = fallback_reason(result) or ""
+        if reason.startswith("LLM call failed") or "spend" in reason.lower():
+            bad.append(case.case_id)
+    return bad
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--day", required=True, choices=config.AGENT_SCORED_DATES)
@@ -42,6 +56,11 @@ def main() -> int:
     parser.add_argument("--run-id", help="Default: batch-<day>-<UTC time>.")
     parser.add_argument(
         "--out", help="Also save the full result to this local JSON file."
+    )
+    parser.add_argument(
+        "--allow-llm-failures",
+        action="store_true",
+        help="Save even if some cases fell back because the LLM call failed or the spend cap was reached.",
     )
     parser.add_argument(
         "--save",
@@ -111,6 +130,15 @@ def main() -> int:
                 default=str,
             )
         print("Saved locally:", args.out)
+
+    if args.save and not args.allow_llm_failures:
+        bad = llm_failures(output.runs)
+        if bad:
+            print(
+                f"NOT SAVED: {len(bad)} cases fell back because the LLM call failed or the spend cap was "
+                "reached (for example a Bedrock daily token quota). Rerun later, or pass --allow-llm-failures."
+            )
+            return 1
 
     if not args.save:
         print("Dry run: nothing was written to DynamoDB or S3. Add --save to write.")

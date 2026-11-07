@@ -131,3 +131,23 @@ def test_the_summary_prints_for_every_outcome(capsys):
 def test_the_summary_prints_with_no_runs(capsys):
     print_summary(summarise_runs([], [], 0), athena_gb=0, seconds=1)
     assert "Cases run: 0" in capsys.readouterr().out
+
+
+def test_run_batch_refuses_to_save_when_the_llm_could_not_be_used():
+    from scripts import run_batch
+
+    class Case:
+        def __init__(self, case_id):
+            self.case_id = case_id
+
+    def result(reason, fallback=True):
+        trace = [{"tool": "fallback", "result": {"reason": reason}}] if fallback else []
+        return {"status": "ok", "stats": {"fallback": fallback}, "trace": trace}
+
+    runs = [
+        (Case("a"), result("LLM call failed: ThrottlingException too many tokens per day")),
+        (Case("b"), result("Estimated LLM spend $10.07 reached the cap of $10.00.")),
+        (Case("c"), result("Brief still invalid after one repair.")),
+        (Case("d"), result("", fallback=False)),
+    ]
+    assert run_batch.llm_failures(runs) == ["a", "b"]

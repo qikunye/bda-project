@@ -1,0 +1,10 @@
+{
+  "version": "0",
+  "source": "aws.states",
+  "detail-type": "Step Functions Execution Status Change",
+  "detail": {
+    "status": "SUCCEEDED",
+    "stateMachineArn": "arn:aws:states:us-east-1:941377154820:stateMachine:is459-etl-v2-silver-wap",
+    "input": "{\"day\": \"2022-09-14\"}"
+  }
+}
