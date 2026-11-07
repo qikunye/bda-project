@@ -3,6 +3,7 @@ cached, so repeating a query costs nothing.
 """
 
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -11,7 +12,12 @@ import pandas as pd
 
 from src import config
 from src.agent.sql import LabelLeakError, assert_label_free
-from src.aws.athena import QueryStats, create_athena_client, execute_query_with_stats
+from src.aws.athena import (
+    AthenaQueryError,
+    QueryStats,
+    create_athena_client,
+    execute_query_with_stats,
+)
 
 Runner = Callable[[str], tuple[pd.DataFrame, QueryStats]]
 
@@ -64,17 +70,32 @@ class AgentData:
             return sum(entry.bytes_scanned for entry in self.scan_log)
 
 
-def athena_runner(client=None) -> Runner:
-    """A runner backed by real Athena, writing results under the agent's prefix."""
+RETRIES = 3  # Attempts for a query that Athena says failed with an internal error.
+RETRY_WAIT_S = 3.0
+
+
+def athena_runner(client=None, *, sleep: Callable[[float], None] = time.sleep) -> Runner:
+    """A runner backed by real Athena, writing results under the agent's prefix.
+
+    Athena sometimes fails a query with "an internal error" and asks you to try again. One such
+    failure would stop a whole day's save, so those are retried. Any other failure is raised.
+    """
 
     client = client or create_athena_client(config.AWS_REGION)
 
     def run(sql: str) -> tuple[pd.DataFrame, QueryStats]:
-        return execute_query_with_stats(
-            client,
-            query=sql,
-            database=config.ATHENA_DATABASE,
-            output_location=config.AGENT_ATHENA_OUTPUT,
-        )
+        for attempt in range(1, RETRIES + 1):
+            try:
+                return execute_query_with_stats(
+                    client,
+                    query=sql,
+                    database=config.ATHENA_DATABASE,
+                    output_location=config.AGENT_ATHENA_OUTPUT,
+                )
+            except AthenaQueryError as error:
+                if "internal error" not in str(error).lower() or attempt == RETRIES:
+                    raise
+                sleep(RETRY_WAIT_S * attempt)
+        raise AssertionError("unreachable")
 
     return run

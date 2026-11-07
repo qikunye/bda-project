@@ -101,7 +101,7 @@ def test_onward_payments_in_another_currency_cannot_be_compared_with_the_alert()
     )
     evidence = make_evidence(ranks={})
     evidence.record("get_case_graph", tools.case_graph_from_frame(alert, frame, 48))
-    assert evidence.graphs["txn_a"]["flow"]["Euro"]["onward_share"] is None
+    assert evidence.graphs["txn_a"]["flow"]["Euro"]["quick_onward_share"] is None
     assert "PASS_THROUGH" not in codes(evidence)
 
 

@@ -55,7 +55,7 @@ class CurrencyFlow(TypedDict):
     # Onward payments / the alert amount, in the alert's own currency only (null in other currencies
     # and when the alert has no amount). Counts only onward payments within
     # AGENT_PASS_THROUGH_MAX_GAP_MIN of the alert. Can be above 1.
-    onward_share: float | None
+    quick_onward_share: float | None
     # Minutes from the alert to the first and the median onward payment; null when none went on.
     fastest_onward_gap_minutes: int | None
     median_onward_gap_minutes: float | None

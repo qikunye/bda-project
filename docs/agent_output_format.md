@@ -77,7 +77,7 @@ It takes about 20 seconds or more, so show a spinner. Unlike the batch it has no
 | `txn_id` | The alert it describes |
 | `no_graph` | `True` if there are no payments to look at (such as a self-transfer) |
 | `n_upstream`, `n_downstream` | Payments into the sender before the alert, and out of the receiver after it |
-| `per_currency[currency]` | `upstream_total`, `downstream_total`, `onward_share` (onward payments within the pass-through gap threshold, 360 minutes for now, as a share of the alert amount, only in the alert's own currency, so `None` in other currencies; can be above 1), `fastest_onward_gap_minutes` and `median_onward_gap_minutes` (minutes from the alert to an onward payment, `None` if nothing went on), and `fastest_onward_txn_id` |
+| `per_currency[currency]` | `upstream_total`, `downstream_total`, `quick_onward_share` (only onward payments within the pass-through gap threshold, 360 minutes for now, as a share of the alert amount, only in the alert's own currency, so `None` in other currencies; can be above 1; 0.0 means nothing went on quickly, even if `downstream_total` is large), `fastest_onward_gap_minutes` and `median_onward_gap_minutes` (minutes from the alert to an onward payment, `None` if nothing went on), and `fastest_onward_txn_id` |
 | `hours_observed_after_alert` | How long after the alert the data reaches, capped at the window. "Nothing went on" only means something if this is large |
 
 ## Finding codes
@@ -99,7 +99,7 @@ Set by code from what the tools could not see. They are not failures: they say h
 
 | Code | Meaning |
 |---|---|
-| `NO_GRAPH_AVAILABLE` | No payments found around the alert |
+| `NO_GRAPH_AVAILABLE` | No payments into the sender or out of the receiver within the window. The accounts may still have other activity, which `get_account_activity` shows |
 | `TRUNCATED_WINDOW` | The window runs past the end of the dataset (16 Sep), so later payments can never be seen. A batch run's own end-of-day cutoff does not set it; `SHORT_OBSERVATION` covers that |
 | `SHORT_OBSERVATION` | Too little time after the alert was observed to say money did not move on |
 | `SHORT_HISTORY` | The accounts' earlier activity was not checked, or too few earlier days are available to compare. Alerts on 14-16 Sep have at least three earlier days, so in practice this means the agent did not check |

@@ -16,3 +16,6 @@ data/cache/
 artifacts/aws-smoke/
 
 *.log
+
+# Local run outputs (large, regenerated)
+runs/

@@ -177,7 +177,7 @@ def _flow(
 ) -> dict[str, CurrencyFlow]:
     """Per currency: the money in and out, and how fast it went on. All edges, not only shown.
 
-    ``onward_share`` compares the receiver's onward payments with the alert amount, because the alert
+    ``quick_onward_share`` compares the receiver's onward payments with the alert amount, because the alert
     is the payment that links the two accounts. It exists only in the alert's own currency, and counts
     only payments within AGENT_PASS_THROUGH_MAX_GAP_MIN of the alert, so a busy receiver's later
     payments over the rest of the window do not count.
@@ -194,7 +194,7 @@ def _flow(
         flow[currency] = CurrencyFlow(
             upstream_total=total_in,
             downstream_total=total_out,
-            onward_share=round(quick_total / alert_amount, 3)
+            quick_onward_share=round(quick_total / alert_amount, 3)
             if alert_amount > 0 and currency == alert.get("currency")
             else None,
             fastest_onward_gap_minutes=int(onward["gap_minutes"].iloc[0])

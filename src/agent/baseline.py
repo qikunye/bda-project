@@ -77,7 +77,7 @@ def brief_case(
                 data, alert, settings.window_h, as_of=settings.as_of
             ),
         )
-        for side in ("sender", "receiver"):
+        activities = [
             run(
                 "get_account_activity",
                 {"txn_id": txn_id, "side": side, "window_h": settings.window_h},
@@ -85,14 +85,27 @@ def brief_case(
                     data, alert, side, settings.window_h, as_of=settings.as_of
                 ),
             )
-        edges = graph["upstream"] + graph["downstream"]
+            for side in ("sender", "receiver")
+        ]
+        # Score every payment a graph or activity result lists, as the finding rule counts them all.
+        listed = [
+            p
+            for p in [
+                *graph["upstream"],
+                *graph["downstream"],
+                *(p for a in activities for p in (*a["incoming"], *a["outgoing"])),
+            ]
+        ]
+        unique = list({p["txn_id"]: p for p in listed}.values())[
+            : config.AGENT_MAX_NEIGHBOUR_IDS
+        ]
         run(
             "get_neighbour_scores",
-            {"txn_ids": [e["txn_id"] for e in edges]},
+            {"txn_ids": [p["txn_id"] for p in unique]},
             lambda: tools.get_neighbour_scores(
                 data,
-                [e["txn_id"] for e in edges],
-                [e["txn_date"] for e in edges],
+                [p["txn_id"] for p in unique],
+                [p["txn_date"] for p in unique],
                 top_k=settings.top_k,
             ),
         )

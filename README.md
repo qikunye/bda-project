@@ -81,7 +81,7 @@ The main safeguards:
 - **Limited runs:** each run has step, token, time and spend caps. If the LLM fails, S1 writes the brief and the result is marked as a fallback.
 - **Realistic timing:** the batch sees data only up to the end of the alert's day, because that's all a daily run would know.
 
-The finding thresholds in `src/config.py` are placeholders until they are set from label-free distributions and frozen. The agent has no final results yet. See [PLAN.md](PLAN.md) for the design and decisions, and the [output format](docs/agent_output_format.md) for the Streamlit contract.
+The finding thresholds in `src/config.py` were set from label-free distributions, with the rule written next to each value, and are frozen in a commit before any label is read. The agent has run on 14 Sep and has no final evaluation results yet. See [PLAN.md](PLAN.md) for the design and decisions, and the [output format](docs/agent_output_format.md) for the Streamlit contract.
 
 ## Status
 
@@ -91,9 +91,9 @@ The finding thresholds in `src/config.py` are placeholders until they are set fr
 | BQ1 model, scores and reasons | Done |
 | BQ2 edges and window evaluation | Done |
 | Real-time path | Done, as a prototype proven on replay slices |
-| Agent code | Built and unit tested with fakes; not yet run on real data |
-| Agent batch on 14-16 Sep | To do |
-| Agent evaluation | To do |
+| Agent code | Built, unit tested, and run on real data for 14 Sep (S1 and LLM) |
+| Agent batch on 14-16 Sep | To do after the freeze commit |
+| Agent evaluation | Harness written (`src/evaluation/`, [instructions](docs/evaluation.md)); to run after the batch |
 | Agent screens in Streamlit | Not started |
 | Automatic trigger from the SQS message | To do |
 
@@ -110,9 +110,10 @@ This repository holds the investigation agent and the serving code around BQ1 an
 | `src/aws/athena.py` | Athena execution |
 | `sql/bq1/` | Ready-made BQ1 queries |
 | `sql/agent/` | Builds the label-free agent tables |
-| `scripts/` | Run the batch, baseline and sample, and rebuild tables |
+| `src/evaluation/` | Evaluation: the only code that reads labels (the agent never imports it) |
+| `scripts/` | Run the batch, baseline, sample and evaluation, and rebuild tables |
 | `evaluate_bq2*.py` and CSVs | BQ2 window evaluation |
-| `docs/` | Handovers, decisions and the Streamlit contract |
+| `docs/` | Handovers, decisions, the Streamlit contract and the [evaluation instructions](docs/evaluation.md) |
 
 ## Data
 

@@ -99,7 +99,7 @@ def compute_gaps(evidence: RunEvidence) -> list[RenderedGap]:
     lead = evidence.graphs.get(evidence.representative)
     if lead is not None and lead["no_graph"]:
         gaps["NO_GRAPH_AVAILABLE"] = (
-            f"No payments were found in the {lead['window_h']} h window around this alert."
+            f"No payments into the sender or out of the receiver were found in the {lead['window_h']} h window around this alert."
         )
 
     truncated = next((g for g in [*graphs, *activities] if g["window_truncated"]), None)
