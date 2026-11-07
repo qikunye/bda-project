@@ -111,6 +111,13 @@ def get_alert(
     )
 
 
+def _horizon(as_of: str | None) -> datetime:
+    """The last moment the agent may see: the end of the data, or an earlier cutoff."""
+
+    horizon = datetime.fromisoformat(config.AGENT_DATA_HORIZON)
+    return min(horizon, _ts(as_of)) if as_of else horizon
+
+
 def _edge(row) -> Edge:
     ts = _ts_text(row["transaction_timestamp"])
     return Edge(
@@ -141,8 +148,12 @@ def get_case_graph(
     window_h: int = config.AGENT_WINDOW_H_DEFAULT,
     *,
     max_edges: int = config.AGENT_MAX_EDGES_PER_DIRECTION,
+    as_of: str | None = None,
 ) -> CaseGraph:
-    """Upstream payments into the sender and downstream payments out of the receiver (BQ2)."""
+    """Upstream payments into the sender and downstream payments out of the receiver (BQ2).
+
+    With ``as_of``, payments after that time are hidden and the window counts as truncated there.
+    """
 
     if not alert.get("found"):
         raise ValueError(
@@ -152,7 +163,7 @@ def get_case_graph(
 
     frame = data.query(
         sql.build_case_graph_query(
-            alert["sender"], alert["receiver"], alert["ts"], window_h
+            alert["sender"], alert["receiver"], alert["ts"], window_h, as_of=as_of
         ),
         f"get_case_graph {alert['txn_id']} {window_h}h",
     )
@@ -168,7 +179,7 @@ def get_case_graph(
     ]
     n_upstream, n_downstream = len(sides["UPSTREAM"]), len(sides["DOWNSTREAM"])
 
-    horizon = datetime.fromisoformat(config.AGENT_DATA_HORIZON)
+    horizon = _horizon(as_of)
     shown = upstream + downstream
     return CaseGraph(
         txn_id=alert["txn_id"],
@@ -186,7 +197,7 @@ def get_case_graph(
         no_graph=n_upstream == 0 and n_downstream == 0,
         edges_capped=n_upstream > len(upstream) or n_downstream > len(downstream),
         window_truncated=_ts(alert["ts"]) + timedelta(hours=window_h) > horizon,
-        horizon_end=config.AGENT_DATA_HORIZON,
+        horizon_end=str(horizon),
         ids=_unique(
             [alert["txn_id"], alert["sender"], alert["receiver"]]
             + [e["txn_id"] for e in shown]
@@ -267,8 +278,12 @@ def get_related_alerts(
     *,
     exclude_txn_ids: tuple[str, ...] = (),
     top_k: int = config.AGENT_TOP_K,
+    as_of: str | None = None,
 ) -> RelatedAlerts:
-    """Other top-K alerts that touch the same accounts within +/- window of the anchor."""
+    """Other top-K alerts that touch the same accounts within +/- window of the anchor.
+
+    With ``as_of``, alerts after that time are left out.
+    """
 
     accounts = [sql.validate_account_key(a) for a in dict.fromkeys(accounts)]
     window_h = sql.validate_window_hours(window_h)
@@ -276,7 +291,8 @@ def get_related_alerts(
     window = timedelta(hours=window_h)
     excluded = set(exclude_txn_ids)
 
-    first, last = (anchor - window).date(), (anchor + window).date()
+    horizon = _horizon(as_of)
+    first, last = (anchor - window).date(), min(anchor + window, horizon).date()
     days = [
         d for d in config.AGENT_SCORED_DATES if first <= date.fromisoformat(d) <= last
     ]
@@ -287,7 +303,7 @@ def get_related_alerts(
             if row["transaction_id"] in excluded:
                 continue
             ts = _ts(row["transaction_timestamp"])
-            if abs(ts - anchor) > window:
+            if abs(ts - anchor) > window or ts > horizon:
                 continue
             for account in accounts:
                 for role, key in (

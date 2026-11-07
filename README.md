@@ -1,102 +1,149 @@
-# AML Alert Triage and Case Expansion
+# IS459 anti-money-laundering alert triage
 
-This repository contains the serving and investigation layer for the IS459
-anti-money-laundering project.
+An end-to-end big data pipeline that helps an analyst decide which payments to review, what they connect to, and which cases deserve attention first.
 
-## Current repository scope
+It uses the synthetic IBM AML dataset (LI-Medium: 31.25M transactions, 16,041 labelled as laundering). The numbers here show how well the system recovers a synthetic pattern, not real-world detection performance.
 
-The repository currently contains:
+| Stage | Question it answers | Output |
+|---|---|---|
+| **BQ1** alert prioritisation | Where should the analyst start? | A risk score and rank for every transaction, with reasons for the top alerts |
+| **BQ2** case expansion | Where should the analyst investigate next? | The payments into the sender and out of the receiver around an alert |
+| **Triage agent** | Is this alert worth an analyst's time? | A raise, don't raise or not sure decision per case, with checked evidence |
 
-- the live BQ2 Streamlit and Athena investigation application;
-- BQ2 evaluation tooling and evaluation results;
-- BQ1 serving SQL and its documented handoff contract;
-- the validated CaseContext data layer that feeds the AI Copilot; and
-- the AI Investigation Copilot backend: grounded case summaries generated with
-  Amazon Nova 2 Lite on Amazon Bedrock and checked against the case evidence.
-  Its Streamlit panel is not built yet.
-
-BQ1 model training and feature engineering are maintained externally. The
-shared Silver ETL pipeline is also maintained externally. This repository
-consumes their production outputs through Athena and does not contain either
-upstream pipeline.
-
-The external data contracts currently used by this repository are:
-
-- Silver transactions: `is459_aml_silver.li_medium_transactions_medium_live_01`
-- BQ1 scores: `is459_aml_gold.bq1_risk_scores_medium_v1`
-- BQ2 edges: `is459_aml_gold.bq2_graph_edges_medium_v1`
-
-## Current architecture
+## Pipeline
 
 ```text
-Silver
- ├── upstream BQ1 pipeline → BQ1 Gold
- └── BQ2 edge processing   → BQ2 Gold
+DAILY      Raw CSV
+             → Step Functions is459-etl-v2-silver-wap
+               (parse → audit + 11 quality rules → publish Silver → BQ1 and BQ2 in parallel → Gold commit)
+             → success message on SQS is459-etl-v2-day-ready
+             → label-free agent tables rebuilt
+             → top 100 alerts of the day grouped into cases
+             → agent decides each case
+             → DynamoDB + S3 traces → Streamlit
 
-BQ1 Gold + BQ2 Gold
-        ↓
-      Athena
-        ↓
- Streamlit  ──►  CaseContext (src/context)
-                       ↓
-                 AI Copilot (src/ai) ──► Amazon Bedrock (Nova 2 Lite)
+ON DEMAND  Analyst's Investigate button → same agent on one alert → Streamlit
+
+REAL-TIME  Kinesis → Lambda is459-rt-scorer (same BQ1 model)
+             → is459_rt_alerts → is459-rt-explainer → is459_rt_briefs → Streamlit
+             Display only: it doesn't go through the agent.
 ```
 
-The BQ1-to-BQ2 handoff supplies the transaction ID, source account key,
-target account key, and transaction timestamp for the selected alert.
+The automatic link from the SQS message to the agent isn't built yet, so the batch is currently started by hand. See [Status](#status).
 
-## Local environment
+## BQ1: alert prioritisation
 
-Recommended Python: 3.12.4
+An XGBoost model scores every transaction from features describing the payment, recent sender and receiver activity, whether the pair has paid each other before, and how unusual the amount is. Features use only earlier transactions, and the data is split by time: train on 1-9 Sep, tune on 9-14 Sep, test on 14-16 Sep.
 
-Create an isolated environment and install the validated direct dependencies:
+Results on the test days (6.25M transactions, 3,013 labelled as laundering):
+
+| Model | Recall@0.1% | Recall@1% | Recall@10% | Precision@1% |
+|---|---|---|---|---|
+| Random | 0.001 | 0.010 | 0.100 | 0.05% |
+| Rules baseline | 0.009 | 0.188 | 0.689 | 0.9% |
+| Logistic regression | 0.183 | 0.446 | 0.885 | 2.2% |
+| **XGBoost (selected)** | **0.302** | **0.634** | **0.928** | **3.1%** |
+
+- **Reasons:** the top 1% of the test queue has the model's top three reasons per alert. These explain the score, and they aren't proof of laundering.
+- **Scores:** `risk_score` is for ranking, not a probability.
+- **Fair comparisons:** performance figures must use test rows only. The last days of the data (17-27 Sep) are tiny and mostly laundering, so they're excluded.
+
+More detail: [BQ1 handover](docs/handovers/BQ1_HANDOVER.md) and [methods and decisions](docs/decisions/BQ1_methods_and_decisions.md).
+
+## BQ2: case expansion
+
+BQ2 turns transactions into directed payment edges and looks one hop around an alert, within a window of 6-72 hours:
+
+- **Upstream:** payments into the alert's sender before the alert.
+- **Downstream:** payments out of the alert's receiver after the alert.
+
+The default window is 48 hours, chosen from an evaluation on sampled laundering-pattern alerts ([results](bq2_window_tradeoff_evaluation.csv)). At 48 hours, 89% of cases recovered both the upstream and downstream partner, with a median of 3 candidate accounts. Going from 24 to 48 hours raised that from 70%, and 72 hours reached 98% with more payments to review.
+
+## Triage agent
+
+For each day's top 100 alerts, code groups alerts that share an account within the window into cases. An LLM (Sonnet 4.5 on Bedrock) then uses read-only tools to combine BQ1's reasons, BQ2's payments, BQ1's ranks for those payments and other top alerts on the same accounts.
+
+| Verdict | Meaning | In the agent's review list |
+|---|---|---|
+| `raise` | Show this case to an analyst | Moves up with its case |
+| `not_sure` | Not enough evidence, including no payments to check | Stays in BQ1 order |
+| `dont_raise` | Payments exist but don't support the model's reasons | Moves to the bottom |
+
+The main safeguards:
+
+- **No labels:** the agent reads label-free tables, and a label reaching it stops the run.
+- **Checked evidence:** code checks every cited ID, and the displayed sentences take their numbers from tool results.
+- **Nothing lost:** no alert is ever removed from the BQ1 queue.
+- **Limited runs:** each run has step, token, time and spend caps. If the LLM fails, a fixed-rule baseline (S1) decides and the result is marked as a fallback.
+- **Realistic timing:** the batch sees data only up to the end of the alert's day, because that's all a daily run would know.
+
+The agent has no final results yet. See [PLAN.md](PLAN.md) for the design and decisions, and the [output format](docs/agent_output_format.md) for the Streamlit contract.
+
+## Status
+
+| Part | Status |
+|---|---|
+| ETL and Gold tables | Done |
+| BQ1 model, scores and reasons | Done |
+| BQ2 edges and window evaluation | Done |
+| Real-time path | Done, as a prototype proven on replay slices |
+| Agent code | Built and unit tested; the current rules haven't been run on real data |
+| Agent batch on 14-16 Sep | To do |
+| Agent evaluation | To do |
+| Agent screens in Streamlit | To do |
+| Automatic trigger from the SQS message | To do |
+
+## What's in this repository
+
+This repository holds the triage agent and the serving code around BQ1 and BQ2. These parts live elsewhere: the ETL, BQ1 training and feature engineering, the real-time path, and the Stage 5 dashboard (see its [handoff](docs/handovers/STREAMLIT_HANDOFF_OWEN.md)).
+
+| Path | What it is |
+|---|---|
+| `src/agent/` | Tools, case grouping, baseline, LLM loop, validator, batch runner and storage |
+| `src/bq1/`, `src/shared/` | BQ1 score lookup (not used by the agent) |
+| `src/bq2/queries.py` | BQ2 case query, used to check that the agent's edges match it |
+| `src/aws/athena.py` | Athena execution |
+| `sql/bq1/` | Ready-made BQ1 queries |
+| `sql/agent/` | Builds the label-free agent tables |
+| `scripts/` | Run the batch, baseline and sample, and rebuild tables |
+| `evaluate_bq2*.py` and CSVs | BQ2 window evaluation |
+| `docs/` | Handovers, decisions and the Streamlit contract |
+
+## Data
+
+Everything is in AWS `us-east-1`, in `s3://is459-aml-g1t5/` and the Athena database `is459_aml_gold`:
+
+- **Gold:** `bq1_risk_scores_medium_v2`, `bq1_features_medium_v2`, `bq2_graph_edges_medium_v2`. These contain labels, so they're for evaluation and BQ1/BQ2 work only.
+- **Agent:** `agent_scores_v2`, `agent_edges_v2`, `agent_day_queue_v2`. These are label-free.
+- **Agent results:** DynamoDB `is459_agent_decisions` and `is459_agent_cases`, with traces under `s3://is459-aml-g1t5/agent/traces/`.
+
+The BQ1 handover describes the earlier `v1` tables. `v1` and `v2` match on the test days.
+
+## Setup
+
+Use Python 3.12.4:
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-streamlit run app.py
 ```
 
-## Run the current app
-
-Install the dependencies in `requirements.txt`, configure AWS access through
-the normal AWS credential provider chain, and run:
+## Commands
 
 ```bash
-streamlit run app.py
+# Unit tests, with no AWS access or paid calls. Bare `pytest` fails on a name clash.
+.venv/bin/python -m pytest tests
+
+# One day's agent batch. A dry run unless you add --save. Spends money on Athena and Bedrock.
+python -m scripts.run_batch --day 2022-09-14 --out batch.json
+
+# The fixed-rule baseline for one day. Spends a little on Athena.
+python -m scripts.run_s1 --day 2022-09-14 --out s1.json
 ```
-
-## AI Copilot
-
-The Copilot turns one alert's CaseContext into a short summary. The LLM's
-answer is checked in Python before it can be shown. Account patterns and the
-connected-account review table are computed in Python, not by the model. See
-[docs/handovers/AI_COPILOT_HANDOFF.md](docs/handovers/AI_COPILOT_HANDOFF.md)
-for the interface, checks, evaluation results and open issues.
-
-```bash
-# One summary of the checked-in synthetic example (a billed Bedrock call).
-.venv/bin/python scripts/demo_ai_summary.py
-
-# Unit tests, with no AWS access or paid calls.
-.venv/bin/python -m pytest tests -q
-```
-
-The model is set by `BEDROCK_MODEL_ID` in `src/config.py`. Anthropic models are
-not available on this account's Bedrock; Amazon Nova is.
 
 ## AWS authentication
 
-This project uses AWS CLI login-based credentials through boto3's standard
-credential provider chain. Install the complete project requirements before
-accessing AWS; the pinned Botocore CRT extra supplies the AWS CRT support that
-the login credential provider requires.
+This project uses AWS CLI login credentials through boto3's standard credential chain. The pinned Botocore CRT extra provides the support that login needs. A missing or expired login is an authentication problem, which is different from a permission denied after login succeeds.
 
-An existing AWS CLI login session may expire and need to be refreshed
-separately. A missing or expired login session is an authentication problem.
-It is distinct from an IAM, Lake Formation, Glue, Athena, or S3 permission
-denial received after authentication succeeds.
-
-Never hard-code AWS credentials or store credentials, tokens, or authentication
-cache contents in this repository.
+Never hard-code AWS credentials or store credentials, tokens or authentication caches in this repository.

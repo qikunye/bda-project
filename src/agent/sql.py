@@ -117,7 +117,7 @@ WHERE txn_date = DATE '{txn_date}'
 
 
 def build_case_graph_query(
-    sender: str, receiver: str, ts: str, window_hours: int
+    sender: str, receiver: str, ts: str, window_hours: int, as_of: str | None = None
 ) -> str:
     """One-hop upstream/downstream edges around an alert.
 
@@ -125,7 +125,7 @@ def build_case_graph_query(
     sender with ts <= alert and gap <= window; downstream = payments out of the receiver
     with ts >= alert and gap <= window. It reads the agent edge table, bucketed by
     account, and returns only the columns the agent uses. The alert row is not returned;
-    get_alert already has it.
+    get_alert already has it. With ``as_of``, payments after that time are left out.
     """
 
     sender = validate_account_key(sender)
@@ -135,7 +135,13 @@ def build_case_graph_query(
     minutes = window_hours * 60
     at = f"TIMESTAMP '{anchor:%Y-%m-%d %H:%M:%S}'"
     up_dates = f"DATE '{(anchor - window).date()}' AND DATE '{anchor.date()}'"
-    down_dates = f"DATE '{anchor.date()}' AND DATE '{(anchor + window).date()}'"
+    down_end = anchor + window
+    cutoff = ""
+    if as_of is not None:
+        as_of_time = datetime.fromisoformat(validate_timestamp(as_of))
+        down_end = min(down_end, as_of_time)
+        cutoff = f"\n  AND transaction_timestamp <= TIMESTAMP '{as_of_time:%Y-%m-%d %H:%M:%S}'"
+    down_dates = f"DATE '{anchor.date()}' AND DATE '{down_end.date()}'"
     return assert_label_free(f"""
 SELECT
   'UPSTREAM' AS edge_role,
@@ -169,7 +175,7 @@ WHERE account_key = '{receiver}'
   AND direction = 'out'
   AND txn_date BETWEEN {down_dates}
   AND transaction_timestamp >= {at}
-  AND DATE_DIFF('minute', {at}, transaction_timestamp) <= {minutes}
+  AND DATE_DIFF('minute', {at}, transaction_timestamp) <= {minutes}{cutoff}
 """)
 
 

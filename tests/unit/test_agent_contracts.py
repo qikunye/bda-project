@@ -76,7 +76,6 @@ def test_every_cited_id_came_from_a_tool(name):
     for claim in decision["claims"]:
         assert claim["code"] in get_args(ClaimCode)
         assert set(claim["evidence_ids"]) <= known
-    assert set(decision["promoted_txn_ids"]) <= known
     if decision["case_id"]:
         assert decision["case_id"] == claims.case_id_for(result["txn_id"])
     sql.validate_transaction_id(result["txn_id"])
@@ -94,12 +93,23 @@ def test_flag_claims_match_the_tool_flags(name):
         assert result["alert"]["reasons"] is None
 
 
-def test_promoted_ids_are_scored_neighbours_outside_the_top_k():
-    result = SAMPLES["promote"]
-    by_id = {n["txn_id"]: n for n in result["neighbours"]["neighbours"]}
-    assert result["decision"]["promoted_txn_ids"]
-    for txn_id in result["decision"]["promoted_txn_ids"]:
-        assert by_id[txn_id]["in_day_top_k"] is False
+def test_a_no_graph_sample_is_never_dont_raise():
+    assert SAMPLES["no_graph"]["decision"]["verdict"] == "not_sure"
+
+
+@pytest.mark.parametrize("name", OK_SAMPLES)
+def test_every_sample_lists_its_members_starting_with_the_representative(name):
+    result = OK_SAMPLES[name]
+    assert result["members"][0]["alert"]["txn_id"] == result["txn_id"]
+    assert all(m["graph"]["txn_id"] == m["alert"]["txn_id"] for m in result["members"])
+
+
+def test_a_case_sample_shows_every_member():
+    members = SAMPLES["raise_case"]["members"]
+    assert [m["alert"]["txn_id"] for m in members] == [
+        "txn_samplemerge",
+        "txn_samplemember1",
+    ]
 
 
 def test_totals_stay_per_currency():
@@ -112,16 +122,30 @@ def test_every_claim_code_has_a_sentence():
 
 
 def test_sentences_take_numbers_from_tool_results():
-    result = SAMPLES["merge_into_case"]
+    result = SAMPLES["raise_case"]
     sentences = [c["sentence"] for c in result["rendered_claims"]]
-    assert sentences[0] == f"Neighbours in the day's top {config.AGENT_TOP_K}: 2 of 2 scored."
-    assert sentences[1] == f"Other top {config.AGENT_TOP_K} alerts on the same accounts within 48 h: 1."
-    assert "12 minutes" in SAMPLES["escalate"]["rendered_claims"][1]["sentence"]
+    assert (
+        sentences[0]
+        == f"Neighbours in the day's top {config.AGENT_TOP_K}: 2 of 2 scored."
+    )
+    assert (
+        sentences[1]
+        == f"Other top {config.AGENT_TOP_K} alerts on the same accounts within 48 h: 1."
+    )
+    assert "12 minutes" in SAMPLES["raise"]["rendered_claims"][1]["sentence"]
+
+
+def test_a_fast_chain_gap_can_come_from_another_members_graph():
+    graph = SAMPLES["raise"]["graph"]
+    edge = graph["downstream"][0]
+    claim = {"code": "FAST_CHAIN", "evidence_ids": [edge["txn_id"]]}
+    sentence = claims.render_claim(claim, member_graphs=[graph])["sentence"]
+    assert f"{edge['gap_minutes']} minutes" in sentence
 
 
 def test_unscored_neighbours_are_not_counted():
     claim = {"code": "NEIGHBOURS_HIGH_RISK", "evidence_ids": []}
-    neighbours = SAMPLES["deprioritise"]["neighbours"]
+    neighbours = SAMPLES["dont_raise"]["neighbours"]
     sentence = claims.render_claim(claim, neighbours=neighbours)["sentence"]
     assert sentence.endswith("0 of 0 scored.")
 
@@ -133,14 +157,14 @@ def test_sentence_has_no_numbers_when_no_tool_ran(code):
 
 
 def test_sentences_never_use_the_llm_note():
-    result = SAMPLES["need_more"]
+    result = SAMPLES["not_sure"]
     note = result["decision"]["note"]
     assert note and all(note not in c["sentence"] for c in result["rendered_claims"])
 
 
 def test_rows_have_one_full_representative_and_short_pointers():
     rows = build_decision_rows(
-        SAMPLES["merge_into_case"],
+        SAMPLES["raise_case"],
         run_id="r1",
         created_at="2026-11-06T00:00:00+00:00",
         member_txn_ids=["txn_samplemember1", "txn_samplemerge"],
@@ -153,12 +177,6 @@ def test_rows_have_one_full_representative_and_short_pointers():
     assert member["representative_txn_id"] == "txn_samplemerge"
     assert member["case_id"] == full["case_id"]
     assert member["verdict"] == full["verdict"]
-
-
-def test_promoted_neighbour_gets_its_own_row():
-    rows = build_decision_rows(SAMPLES["promote"], run_id="r1", created_at="t")
-    assert [r["role"] for r in rows] == ["representative", "promoted"]
-    assert rows[1]["transaction_id"] == "txn_samplelowrank"
 
 
 def test_not_found_has_no_rows():

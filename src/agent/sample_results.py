@@ -11,6 +11,7 @@ from src.agent.claims import case_id_for, render_claims
 from src.agent.contracts import (
     Alert,
     CaseGraph,
+    CaseMember,
     Claim,
     Decision,
     DecisionRow,
@@ -172,14 +173,12 @@ def _decision(
     claims: list[Claim],
     *,
     case_id: str | None = None,
-    promoted: tuple[str, ...] = (),
     note: str | None = None,
 ) -> Decision:
     return Decision(
         verdict=verdict,
         confidence=confidence,
         case_id=case_id,
-        promoted_txn_ids=list(promoted),
         claims=claims,
         note=note,
     )
@@ -196,6 +195,7 @@ def _result(
     graph: CaseGraph | None = None,
     neighbours: NeighbourScores | None = None,
     related: RelatedAlerts | None = None,
+    other_members: tuple[CaseMember, ...] = (),
     repair: bool = False,
     fallback: bool = False,
 ) -> InvestigateResult:
@@ -240,6 +240,7 @@ def _result(
     else:
         add("llm", "submit_decision", decision, {"valid": True})
 
+    members = [CaseMember(alert=alert, graph=graph), *other_members]
     return InvestigateResult(
         status="ok",
         txn_id=txn_id,
@@ -248,11 +249,16 @@ def _result(
         alert=alert,
         decision=decision,
         rendered_claims=render_claims(
-            decision, graph=graph, neighbours=neighbours, related=related
+            decision,
+            graph=graph,
+            neighbours=neighbours,
+            related=related,
+            member_graphs=[member["graph"] for member in members],
         ),
         graph=graph,
         neighbours=neighbours,
         related=related,
+        members=members,
         stats=RunStats(
             model="sample",
             steps=tool_steps,
@@ -267,14 +273,14 @@ def _result(
     )
 
 
-def _escalate() -> InvestigateResult:
+def _raise() -> InvestigateResult:
     alert = _alert("txn_sampleescalate", 2)
     up = _edge(alert, "txn_sampleup1", 30, upstream=True)
     down = _edge(alert, "txn_sampledown1", 12, upstream=False)
     return _result(
         alert,
         _decision(
-            "escalate",
+            "raise",
             "high",
             [
                 _claim("REASONS_CORROBORATED", alert["txn_id"], up["txn_id"]),
@@ -285,8 +291,9 @@ def _escalate() -> InvestigateResult:
     )
 
 
-def _merge() -> InvestigateResult:
+def _raise_case() -> InvestigateResult:
     alert = _alert("txn_samplemerge", 5)
+    member = _alert("txn_samplemember1", 40, ts="2022-09-14 11:00:00")
     up = _edge(alert, "txn_samplemergeup", 45, upstream=True)
     down = _edge(alert, "txn_samplemergedown", 20, upstream=False)
     related = RelatedAlerts(
@@ -307,7 +314,7 @@ def _merge() -> InvestigateResult:
     return _result(
         alert,
         _decision(
-            "merge_into_case",
+            "raise",
             "medium",
             [
                 _claim("NEIGHBOURS_HIGH_RISK", up["txn_id"], down["txn_id"]),
@@ -318,33 +325,17 @@ def _merge() -> InvestigateResult:
         graph=_graph(alert, [up], [down]),
         neighbours=_neighbours(_neighbour(up["txn_id"], 30), _neighbour(down["txn_id"], 80)),
         related=related,
+        other_members=(CaseMember(alert=member, graph=_graph(member, [], [])),),
     )
 
 
-def _promote() -> InvestigateResult:
-    alert = _alert("txn_samplepromote", 8)
-    down = _edge(alert, "txn_samplelowrank", 15, upstream=False)
-    return _result(
-        alert,
-        _decision(
-            "promote",
-            "medium",
-            [_claim("FAST_CHAIN", down["txn_id"])],
-            case_id=case_id_for(alert["txn_id"]),
-            promoted=(down["txn_id"],),
-        ),
-        graph=_graph(alert, [], [down]),
-        neighbours=_neighbours(_neighbour(down["txn_id"], 4200)),
-    )
-
-
-def _deprioritise() -> InvestigateResult:
+def _dont_raise() -> InvestigateResult:
     alert = _alert("txn_sampledeprioritise", 450)
     up = _edge(alert, "txn_sampleroutine", 2000, upstream=True)
     return _result(
         alert,
         _decision(
-            "deprioritise",
+            "dont_raise",
             "medium",
             [_claim("REASONS_NOT_SUPPORTED", alert["txn_id"], up["txn_id"])],
         ),
@@ -353,13 +344,13 @@ def _deprioritise() -> InvestigateResult:
     )
 
 
-def _need_more() -> InvestigateResult:
+def _not_sure() -> InvestigateResult:
     alert = _alert("txn_sampleneedmore", 300)
     up = _edge(alert, "txn_samplepartial", 600, upstream=True)
     return _result(
         alert,
         _decision(
-            "need_more",
+            "not_sure",
             "low",
             [_claim("REASONS_NOT_SUPPORTED", alert["txn_id"])],
             note="The graph is thin, so this needs an analyst's review.",
@@ -374,7 +365,7 @@ def _no_reasons() -> InvestigateResult:
     return _result(
         alert,
         _decision(
-            "need_more",
+            "not_sure",
             "low",
             [_claim("NO_REASONS_AVAILABLE", alert["txn_id"])],
         ),
@@ -390,7 +381,7 @@ def _no_graph() -> InvestigateResult:
     return _result(
         alert,
         _decision(
-            "deprioritise",
+            "not_sure",
             "low",
             [_claim("NO_GRAPH_AVAILABLE", alert["txn_id"])],
         ),
@@ -405,8 +396,8 @@ def _truncated() -> InvestigateResult:
     return _result(
         alert,
         _decision(
-            "escalate",
-            "low",
+            "raise",
+            "medium",
             [
                 _claim("REASONS_CORROBORATED", alert["txn_id"], up["txn_id"]),
                 _claim("TRUNCATED_WINDOW", alert["txn_id"]),
@@ -421,7 +412,7 @@ def _repaired() -> InvestigateResult:
     down = _edge(alert, "txn_samplerepaireddown", 18, upstream=False)
     return _result(
         alert,
-        _decision("escalate", "medium", [_claim("FAST_CHAIN", down["txn_id"])]),
+        _decision("raise", "medium", [_claim("FAST_CHAIN", down["txn_id"])]),
         graph=_graph(alert, [], [down]),
         repair=True,
     )
@@ -432,7 +423,7 @@ def _fallback() -> InvestigateResult:
     down = _edge(alert, "txn_samplefallbackdown", 22, upstream=False)
     return _result(
         alert,
-        _decision("escalate", "low", [_claim("FAST_CHAIN", down["txn_id"])]),
+        _decision("raise", "low", [_claim("FAST_CHAIN", down["txn_id"])]),
         graph=_graph(alert, [], [down]),
         neighbours=_neighbours(_neighbour(down["txn_id"], 900)),
         fallback=True,
@@ -452,6 +443,7 @@ def _not_found() -> InvestigateResult:
         graph=None,
         neighbours=None,
         related=None,
+        members=[],
         stats=None,
         trace=[],
     )
@@ -461,11 +453,10 @@ def sample_investigations() -> dict[str, InvestigateResult]:
     """One made-up result per situation the Streamlit screens must handle."""
 
     return {
-        "escalate": _escalate(),
-        "merge_into_case": _merge(),
-        "promote": _promote(),
-        "deprioritise": _deprioritise(),
-        "need_more": _need_more(),
+        "raise": _raise(),
+        "raise_case": _raise_case(),
+        "dont_raise": _dont_raise(),
+        "not_sure": _not_sure(),
         "no_reasons": _no_reasons(),
         "no_graph": _no_graph(),
         "truncated": _truncated(),
@@ -482,7 +473,7 @@ def sample_decision_rows() -> list[DecisionRow]:
     for name, result in sample_investigations().items():
         if result["status"] != "ok":
             continue
-        members = ("txn_samplemember1",) if name == "merge_into_case" else ()
+        members = ("txn_samplemember1",) if name == "raise_case" else ()
         rows.extend(
             build_decision_rows(
                 result,

@@ -3,7 +3,6 @@ boto3==1.43.112
 botocore[crt]==1.43.112
 pandas==3.0.6
 streamlit==1.65.0
-pyvis==0.3.2
 
 # Development tooling
 pytest==8.3.5
