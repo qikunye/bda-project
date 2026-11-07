@@ -102,6 +102,7 @@ This repository holds the triage agent and the serving code around BQ1 and BQ2. 
 | `src/agent/` | Tools, case grouping, baseline, LLM loop, validator, batch runner and storage |
 | `src/bq1/`, `src/shared/` | BQ1 score lookup (not used by the agent) |
 | `src/bq2/queries.py` | BQ2 case query, used to check that the agent's edges match it |
+| `src/bq2/evidence.py`, `transforms.py` | Structured evidence and transformations from BQ2 edges (not used by the agent) |
 | `src/aws/athena.py` | Athena execution |
 | `sql/bq1/` | Ready-made BQ1 queries |
 | `sql/agent/` | Builds the label-free agent tables |

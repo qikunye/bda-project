@@ -2,13 +2,13 @@
 
 Owner: Claire (agent). Last updated 7 Nov 2026. Team split: `WORK_SPLIT.md` (deleted from the working folder but still in git: `git show HEAD:WORK_SPLIT.md`). ETL and real-time details: `ETL_v2_Handover.docx` (kept outside this repo).
 
-**Status:** the ETL and real-time pipelines are finished. Agent data access, the output format, S1, the LLM loop, the batch runner and `investigate()` are built, and 378 unit tests pass. The current rules (D27, D28) have only run on fake data in tests, not on AWS or the real LLM. The saved 14 Sep batch (F29) predates them, so its rows are out of date.
+**Status:** the ETL and real-time pipelines are finished. Agent data access, the output format, S1, the LLM loop, the batch runner and `investigate()` are built, and 424 unit tests pass. The current rules (D27, D28) have only run on fake data in tests, not on AWS or the real LLM. The saved 14 Sep batch (F29) predates them, so its rows are out of date.
 
 ## Where to continue
 
-Changes made on 7 Nov, all uncommitted: the use case is now triage; promotions and the merge verdict are gone; the batch has an end-of-day cutoff; no payments means `not_sure`; results list every case member; the review list is simpler; the Copilot and old `app.py` are deleted; the README covers the whole project.
+Changes made on 7 Nov, in commit `451b0c8` on `feat/agent`: the use case is now triage; promotions and the merge verdict are gone; the batch has an end-of-day cutoff; no payments means `not_sure`; results list every case member; the review list is simpler; the Copilot and old `app.py` are deleted; the README covers the whole project.
 
-1. **Commit the work.** Most agent code is untracked, so git can't restore it yet.
+1. **Commit the BQ2 restore.** `src/bq2/evidence.py`, `transforms.py` and their tests are back but not committed yet.
 2. **Tell the team.** Person 2: the contract changed (`docs/agent_output_format.md`: new `members` field, no `promoted_txn_ids`). Person 4: the evaluation changed (section 13). Don't use the saved 14 Sep rows.
 3. **Check billing.** Confirm whether credits cover Sonnet (section 15).
 4. **Rerun the sample** (about US$1.50): `python -m scripts.run_agent_sample --day 2022-09-14 --limit 20 --out <file>`. Check the share of cases raised against F29's 92%, plus the valid, repair and fallback rates.
@@ -135,7 +135,7 @@ Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say ful
 |---|---|---|---|
 | 1 | Data access | Claire | Done |
 | - | Output format | Claire | Done |
-| 2 | Case grouping + S1 | Claire | Done, not yet committed |
+| 2 | Case grouping + S1 | Claire | Done |
 | 3 | Evaluation harness | Person 4 | To do |
 | 4 | LLM loop + validator | Claire | Built, rules changed 7 Nov. 20-case rerun next |
 | 5 | Batch runner, `investigate()` | Claire | Built, rules changed 7 Nov. 14-16 Sep runs to do (F29 is out of date) |
@@ -205,7 +205,7 @@ Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say ful
 | D18 | Results come from 14-16 Sep only. The demo is recorded only, as a setup pipeline and a run pipeline. The run follows 18 Sep end to end. There is no live demo. |
 | D19 | The batch reads the existing queue; no new EventBridge rule. |
 | D20 | Tools don't use JX's `is459_agent` views. |
-| D21 | The AI Copilot (`src/ai`, `src/context`) and old `app.py` were removed on 7 Nov and remain in git. `src/bq1` and `src/shared` are kept but the agent doesn't use them. |
+| D21 | The AI Copilot (`src/ai`, `src/context`) and old `app.py` were removed on 7 Nov and remain in git. `src/bq1`, `src/shared`, `src/bq2/evidence.py` and `src/bq2/transforms.py` are kept but the agent doesn't use them. |
 | D22 | Team split in `WORK_SPLIT.md` (other owners TBC). |
 | D23 | Sonnet 4.5 first; Nova 2 Lite as backup. |
 | D24 | Full row for the representative, short pointer rows for other members. *To confirm.* |
@@ -226,7 +226,7 @@ Owned by Person 2. Contract: `docs/agent_output_format.md`. The app must say ful
 
 ## 19. Remaining agent work (Claire)
 
-Steps 1-4 are built and tested (378 tests). File names for later steps are proposals.
+Steps 1-4 are built and tested (424 tests). File names for later steps are proposals.
 
 **Step 3: LLM loop and validator (milestone 4), built**
 - Files: `llm.py`, `prompts.py`, `validate.py`, `loop.py`, and `scripts/run_agent_sample.py` for the sample run.
