@@ -1,0 +1,4 @@
+# Only what scripts.run_batch needs. The repo's requirements.txt also holds Streamlit and dev tools.
+boto3==1.43.112
+botocore[crt]==1.43.112
+pandas==3.0.6

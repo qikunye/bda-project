@@ -1,0 +1,91 @@
+{
+  "Comment": "Runs the agent batch for the day in the event. Triggered by the ETL's day-succeeded rule.",
+  "StartAt": "ParseInput",
+  "TimeoutSeconds": 5400,
+  "States": {
+    "ParseInput": {
+      "Type": "Parallel",
+      "Comment": "The ETL puts its input, a JSON string with the day, in detail.input (PLAN F20).",
+      "Branches": [
+        {
+          "StartAt": "ReadDay",
+          "States": {
+            "ReadDay": {
+              "Type": "Pass",
+              "Parameters": {"parsed.$": "States.StringToJson($.detail.input)"},
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultSelector": {"parsed.$": "$[0].parsed"},
+      "Catch": [{"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyBadInput"}],
+      "Next": "CheckDay"
+    },
+    "CheckDay": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {"Variable": "$.parsed.day", "IsPresent": true},
+            {"Variable": "$.parsed.day", "StringMatches": "20*-*-*"}
+          ],
+          "Next": "RunBatch"
+        }
+      ],
+      "Default": "NotifyBadInput"
+    },
+    "RunBatch": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "TimeoutSeconds": 4800,
+      "Parameters": {
+        "Cluster": "arn:aws:ecs:us-east-1:__ACCOUNT_ID__:cluster/is459-agent",
+        "TaskDefinition": "is459-agent-batch",
+        "LaunchType": "FARGATE",
+        "PlatformVersion": "LATEST",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": __SUBNETS__,
+            "SecurityGroups": __SECURITY_GROUPS__,
+            "AssignPublicIp": "ENABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "batch",
+              "Command.$": "States.Array('python', '-m', 'scripts.run_batch', '--day', $.parsed.day, '--spend-cap', '20', '--save')"
+            }
+          ]
+        },
+        "PropagateTags": "TASK_DEFINITION"
+      },
+      "ResultPath": "$.task",
+      "Catch": [{"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyFailure"}],
+      "Next": "Done"
+    },
+    "Done": {"Type": "Succeed"},
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:__ACCOUNT_ID__:is459-etl-v2-failure-topic",
+        "Subject": "Agent batch failed",
+        "Message.$": "States.Format('The agent batch failed for {}. Nothing was saved if any case failed. Error: {}', $.parsed.day, States.JsonToString($.error))"
+      },
+      "Next": "Failed"
+    },
+    "NotifyBadInput": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:__ACCOUNT_ID__:is459-etl-v2-failure-topic",
+        "Subject": "Agent batch got an event it could not read",
+        "Message": "The agent batch needs detail.input to be JSON with a day such as 2022-09-14. See the execution input."
+      },
+      "Next": "Failed"
+    },
+    "Failed": {"Type": "Fail", "Error": "AgentBatchFailed", "Cause": "See the SNS email and the execution history."}
+  }
+}

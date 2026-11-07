@@ -1,0 +1,25 @@
+{
+  "family": "is459-agent-batch",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "1024",
+  "memory": "4096",
+  "runtimePlatform": {"cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX"},
+  "executionRoleArn": "arn:aws:iam::__ACCOUNT_ID__:role/is459-agent-task-exec-role",
+  "taskRoleArn": "arn:aws:iam::__ACCOUNT_ID__:role/is459-agent-task-role",
+  "containerDefinitions": [
+    {
+      "name": "batch",
+      "image": "__IMAGE__",
+      "essential": true,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/is459-agent-batch",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "batch"
+        }
+      }
+    }
+  ]
+}
