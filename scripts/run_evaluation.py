@@ -27,6 +27,17 @@ def band_by_position(cases: list) -> dict[str, str]:
     return {c.case_id: ("top" if i < third else "middle" if i < 2 * third else "bottom") for i, c in enumerate(cases)}
 
 
+PAYMENT_CODES = ("PASS_THROUGH", "FAN_OUT", "FAN_IN", "MONEY_RETURNS")
+
+
+def bands_for(cases: list) -> dict[str, str]:
+    """Bands by real BQ1 day rank when every case has one, else thirds of the list."""
+
+    if cases and all(c.rank_day is not None for c in cases):
+        return metrics.band_by_rank(cases)
+    return band_by_position(cases)
+
+
 def write_sheet(sheet: list[dict], path: str) -> None:
     with open(path, "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(sheet[0]) if sheet else ["case_id"])
@@ -39,6 +50,10 @@ def main() -> int:
     parser.add_argument("--day", required=True, choices=config.AGENT_SCORED_DATES)
     parser.add_argument("--s1", required=True, help="run_s1 --out file for this day.")
     parser.add_argument("--s2", required=True, help="run_batch --out file for this day.")
+    parser.add_argument(
+        "--s1-deep",
+        help="Optional run_s1_deep --out file (e.g. top 500) for per-finding rates with more positives.",
+    )
     parser.add_argument("--out", help="Where to write the report. Required unless --review-only.")
     parser.add_argument(
         "--review-only",
@@ -65,7 +80,9 @@ def main() -> int:
         raise SystemExit("Refusing to read labels: pass --confirm-frozen once the freeze is committed.")
 
     s1, s2 = load_run(args.s1), load_run(args.s2)
+    deep = load_run(args.s1_deep) if args.s1_deep else []
     report: dict = {"day": args.day, "reliability_s2": metrics.reliability(s2)}
+    report["cost_latency_s2"] = metrics.cost_latency(s2, config.AGENT_PRICE_USD_PER_M_TOKENS)
     report["s2_vs_s1"] = metrics.compare_runs(s1, s2)
 
     if args.review_csv:
@@ -74,13 +91,23 @@ def main() -> int:
         with open(args.marked_csv, newline="") as handle:
             report["observation_marks"] = manual_review.tally(list(csv.DictReader(handle)))
 
-    all_ids = sorted({t for c in (*s1, *s2) for t in c.member_txn_ids})
+    all_ids = sorted({t for c in (*s1, *s2, *deep) for t in c.member_txn_ids})
     labels, scored = fetch_labels(athena_runner(), all_ids)
     report["labels_found"] = {"alerts": len(all_ids), "with_label": len(labels), "positives": sum(labels.values())}
     report["s1_code_rates"] = metrics.code_rates(s1, labels)
     report["s2_code_rates"] = metrics.code_rates(s2, labels)
 
-    report["s1_bq1_derived_by_rank_band"] = metrics.banded_code_rates(s1, labels, band_by_position(s1))
+    report["s1_bq1_derived_by_rank_band"] = metrics.banded_code_rates(s1, labels, bands_for(s1))
+    if deep:
+        report["s1_deep"] = {
+            "cases": len(deep),
+            "code_rates": metrics.code_rates(deep, labels),
+            # Rank bands 1-100, 101-250, 251+ from each case's BQ1 day rank.
+            "bq1_derived_by_rank_band": metrics.banded_code_rates(deep, labels, bands_for(deep)),
+            "payment_codes_by_rank_band": metrics.banded_code_rates(
+                deep, labels, bands_for(deep), codes=PAYMENT_CODES
+            ),
+        }
 
     text = boto3.client("s3", region_name=config.AWS_REGION).get_object(
         Bucket=PATTERNS_BUCKET, Key=PATTERNS_KEY
@@ -90,6 +117,12 @@ def main() -> int:
     report["pattern_coverage"] = coverage
     report["s1_pattern_match"] = metrics.pattern_match(s1, patterns.case_types(members, txn_type))
     report["s2_pattern_match"] = metrics.pattern_match(s2, patterns.case_types(members, txn_type))
+    if deep:
+        # The deeper list can group alerts differently, so it uses its own case membership.
+        deep_members = {c.case_id: c.member_txn_ids for c in deep}
+        report["s1_deep"]["pattern_match"] = metrics.pattern_match(
+            deep, patterns.case_types(deep_members, txn_type)
+        )
 
     Path(args.out).write_text(json.dumps(report, indent=2, default=str))
     print(json.dumps(report, indent=2, default=str))
