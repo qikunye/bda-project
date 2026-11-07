@@ -25,11 +25,6 @@ ALERT_COLUMNS = (
     "amount_paid",
     "payment_currency",
     "payment_format",
-    *(
-        f"{name}_{n}"
-        for n in (1, 2, 3)
-        for name in ("feature", "reason", "contribution")
-    ),
 )
 
 
@@ -99,7 +94,7 @@ def _id_list(txn_ids) -> str:
 
 
 def build_alert_query(txn_id: str, txn_date: str) -> str:
-    """Score, reasons and payment details for one alert (one bucket of one partition)."""
+    """Score and payment details for one alert (one bucket of one partition). The risk model's reasons are never selected."""
 
     txn_id = validate_transaction_id(txn_id)
     txn_date = validate_date(txn_date)
@@ -176,6 +171,69 @@ WHERE account_key = '{receiver}'
 """)
 
 
+def build_account_activity_query(
+    account: str,
+    alert_txn_id: str,
+    ts: str,
+    window_hours: int,
+    as_of: str | None = None,
+) -> str:
+    """Every payment into or out of one account within +/- window of the alert, except the alert.
+
+    ``offset_minutes`` is negative before the alert and positive after it. With ``as_of``, payments
+    after that time are left out.
+    """
+
+    account = validate_account_key(account)
+    alert_txn_id = validate_transaction_id(alert_txn_id)
+    anchor = datetime.fromisoformat(validate_timestamp(ts))
+    window = timedelta(hours=validate_window_hours(window_hours))
+    start, end = anchor - window, anchor + window
+    if as_of is not None:
+        end = min(end, datetime.fromisoformat(validate_timestamp(as_of)))
+    at = f"TIMESTAMP '{anchor:%Y-%m-%d %H:%M:%S}'"
+    return assert_label_free(f"""
+SELECT
+  direction,
+  transaction_id,
+  counterparty_key,
+  transaction_timestamp,
+  DATE_DIFF('minute', {at}, transaction_timestamp) AS offset_minutes,
+  amount_paid,
+  payment_currency,
+  payment_format
+FROM {config.AGENT_EDGES_TABLE}
+WHERE account_key = '{account}'
+  AND txn_date BETWEEN DATE '{start.date()}' AND DATE '{end.date()}'
+  AND transaction_timestamp BETWEEN TIMESTAMP '{start:%Y-%m-%d %H:%M:%S}'
+    AND TIMESTAMP '{end:%Y-%m-%d %H:%M:%S}'
+  AND transaction_id <> '{alert_txn_id}'
+""")
+
+
+def build_account_history_query(account: str, ts: str) -> str:
+    """Daily counts and totals for one account on the whole days before the alert's day.
+
+    Starts at the first day the edge table covers. The caller works out how many days that is.
+    """
+
+    account = validate_account_key(account)
+    anchor = datetime.fromisoformat(validate_timestamp(ts))
+    last = anchor.date() - timedelta(days=1)
+    return assert_label_free(f"""
+SELECT
+  txn_date,
+  direction,
+  payment_currency,
+  COUNT(*) AS n_payments,
+  SUM(amount_paid) AS total_amount
+FROM {config.AGENT_EDGES_TABLE}
+WHERE account_key = '{account}'
+  AND txn_date BETWEEN DATE '{config.AGENT_EDGES_FIRST_DAY}' AND DATE '{last}'
+GROUP BY txn_date, direction, payment_currency
+""")
+
+
 def build_neighbour_scores_query(txn_ids, txn_dates) -> str:
     """Scores for a set of transactions; the date list keeps the scan to those partitions."""
 
@@ -186,8 +244,7 @@ SELECT
   transaction_id,
   risk_score,
   risk_rank_global,
-  risk_rank_day,
-  feature_1 IS NOT NULL AS has_reasons
+  risk_rank_day
 FROM {config.AGENT_SCORES_TABLE}
 WHERE txn_date IN ({_date_list(txn_dates)})
   AND transaction_id IN ({_id_list(txn_ids)})

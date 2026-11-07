@@ -23,7 +23,7 @@ SUBMIT = prompts.SUBMIT
 
 
 def good_run():
-    """Graph, then neighbour scores, then a valid raise."""
+    """Graph, then neighbour scores, then a valid brief."""
 
     return [
         turn(("get_case_graph", {"txn_id": "txn_a"})),
@@ -50,8 +50,9 @@ def test_a_valid_run_returns_the_standard_result(monkeypatch):
 
     assert result["status"] == "ok"
     assert result["txn_id"] == "txn_a"
-    assert result["decision"]["verdict"] == "raise"
-    assert result["decision"]["case_id"] == "case_txn_a"
+    assert result["case_id"] == "case_txn_a"
+    assert result["fallback"] is False
+    assert result["summary"] == "Money came in and went on quickly."
     assert result["stats"] == {
         "model": "scripted-model",
         "steps": 3,
@@ -62,14 +63,18 @@ def test_a_valid_run_returns_the_standard_result(monkeypatch):
         "repair_used": False,
         "fallback": False,
     }
-    assert [c["code"] for c in result["rendered_claims"]] == [
-        "FAST_CHAIN",
+    assert [f["code"] for f in result["findings"]] == [
+        "PASS_THROUGH",
         "NEIGHBOURS_HIGH_RISK",
     ]
-    assert "15 minutes" in result["rendered_claims"][0]["sentence"]
-    assert result["graph"]["txn_id"] == "txn_a"
-    assert result["neighbours"]["ids"] == ["txn_low", "txn_high"]
-    assert result["related"] is None
+    assert "15 minutes" in result["findings"][0]["sentence"]
+    assert result["findings"][0]["evidence_ids"] == ["txn_high", "txn_up"]
+    assert [c["code"] for c in result["next_checks"]] == ["CHECK_ONWARD_ACCOUNTS"]
+    # The model never fetched account activity, so code says the history was not checked.
+    assert [g["code"] for g in result["gaps"]] == ["SHORT_HISTORY"]
+    assert [m["txn_id"] for m in result["money_flow"]] == ["txn_a", "txn_b"]
+    assert result["money_flow"][0]["per_currency"]["US Dollar"]["onward_share"] == 0.8
+    assert "decision" not in result and "rendered_claims" not in result
     json.dumps(result)
 
 
@@ -108,7 +113,7 @@ def test_tool_results_go_back_as_paired_tool_results_without_the_ids_list(monkey
     body = json.loads(block["content"][0]["text"])
     assert "ids" not in body and body["no_graph"] is False
     assert "txn_date" not in body["downstream"][0]
-    assert "Step 1 of 5 used." in history[2]["content"][1]["text"]
+    assert f"Step 1 of {config.AGENT_MAX_STEPS} used." in history[2]["content"][1]["text"]
 
 
 def test_several_tool_calls_in_one_step_run_together(monkeypatch):
@@ -122,14 +127,17 @@ def test_several_tool_calls_in_one_step_run_together(monkeypatch):
             (
                 SUBMIT,
                 valid_payload(
-                    claims=[{"code": "FAST_CHAIN", "evidence_ids": ["txn_low"]}]
+                    findings=[
+                        {"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_b"]}
+                    ],
+                    next_checks=["REVIEW_RELATED_ALERTS"],
                 ),
             )
         ),
     )
     result = run(monkeypatch, llm)
     assert result["stats"]["steps"] == 3
-    assert result["related"]["alerts"][0]["txn_id"] == "txn_b"
+    assert [f["code"] for f in result["findings"]] == ["REPEAT_ACCOUNT_ALERTS"]
     assert (
         len(llm.calls[1]["messages"][2]["content"]) == 3
     )  # two results and the step notice
@@ -138,12 +146,13 @@ def test_several_tool_calls_in_one_step_run_together(monkeypatch):
 def test_a_member_other_than_the_representative_is_fetched_by_code(monkeypatch):
     llm = ScriptedLLM(
         turn(("get_case_graph", {"txn_id": "txn_b"})),
-        turn((SUBMIT, valid_payload(verdict="raise", claims=[]))),
+        turn((SUBMIT, valid_payload(findings=[], next_checks=[]))),
     )
     result = run(monkeypatch, llm)
     assert tool_names(result, "code") == ["get_alert", "get_alert", "get_case_graph"]
-    assert result["graph"] is None  # The LLM never fetched the representative's graph.
+    assert result["findings"] == []  # An empty brief is a valid answer.
     assert [m["graph"]["txn_id"] for m in result["members"]] == ["txn_a", "txn_b"]
+    assert [m["txn_id"] for m in result["money_flow"]] == ["txn_a", "txn_b"]
 
 
 def test_every_member_comes_back_with_its_alert_and_graph(monkeypatch):
@@ -166,7 +175,7 @@ def test_a_graph_the_model_fetched_is_not_fetched_again(monkeypatch):
     calls = stub_tools(monkeypatch)
     llm = ScriptedLLM(
         turn(("get_case_graph", {"txn_id": "txn_a", "window_h": 24})),
-        turn((SUBMIT, valid_payload(verdict="not_sure", claims=[]))),
+        turn((SUBMIT, valid_payload(findings=[], next_checks=[]))),
     )
     result = run_agent(None, llm, case_of("txn_a"))
     assert [c for c in calls if c[0] == "get_case_graph"] == [("get_case_graph", "txn_a", 24)]
@@ -179,26 +188,27 @@ def test_the_cutoff_reaches_every_tool_that_reads_later_data(monkeypatch):
     llm = ScriptedLLM(
         turn(
             ("get_case_graph", {"txn_id": "txn_a"}),
+            ("get_account_activity", {"txn_id": "txn_a", "side": "sender"}),
             ("get_related_alerts", {"txn_id": "txn_a"}),
         ),
-        turn((SUBMIT, valid_payload(verdict="not_sure", claims=[]))),
+        turn((SUBMIT, valid_payload(findings=[], next_checks=[]))),
     )
     run_agent(None, llm, case_of("txn_a", "txn_b"), settings=settings)
-    assert calls.as_of_seen  # Includes the graph code fetched for txn_b.
+    assert len(calls.as_of_seen) >= 4  # Includes the graph code fetched for txn_b.
     assert set(calls.as_of_seen) == {"2022-09-14 23:59:59"}
 
 
-def test_the_note_and_window_are_passed_through(monkeypatch):
+def test_the_summary_and_window_are_passed_through(monkeypatch):
     calls = stub_tools(monkeypatch)
     llm = ScriptedLLM(
         turn(("get_case_graph", {"txn_id": "txn_a", "window_h": 24})),
         turn(("get_neighbour_scores", {"txn_ids": ["txn_low", "txn_high"]})),
-        turn((SUBMIT, valid_payload(note="Money moves on quickly."))),
+        turn((SUBMIT, valid_payload(summary="Money moves on quickly."))),
     )
     result = run_agent(None, llm, case_of("txn_a"))
     assert ("get_case_graph", "txn_a", 24) in calls
-    assert result["decision"]["note"] == "Money moves on quickly."
-    assert result["decision"]["case_id"] is None  # A single alert has no case_id.
+    assert result["summary"] == "Money moves on quickly."
+    assert result["case_id"] is None  # A single alert has no case_id.
 
 
 # --- Tool input checks
@@ -212,6 +222,11 @@ def test_unknown_ids_and_bad_inputs_are_returned_to_the_model_as_errors(monkeypa
             ("get_case_graph", {"txn_id": "txn_a", "window_h": 500}),
             ("get_nothing", {}),
         ),
+        turn(
+            ("get_account_activity", {"txn_id": "txn_a", "side": "both"}),
+            ("get_related_alerts", {"txn_id": "txn_a", "accounts": ["99|NOPE"]}),
+            ("get_related_alerts", {"txn_id": "txn_a", "accounts": "3|C"}),
+        ),
         *good_run(),
     )
     result = run(monkeypatch, llm)
@@ -220,6 +235,11 @@ def test_unknown_ids_and_bad_inputs_are_returned_to_the_model_as_errors(monkeypa
     assert "not a transaction ID" in blocks[0]["toolResult"]["content"][0]["text"]
     assert "Window must be" in blocks[2]["toolResult"]["content"][0]["text"]
     assert "Unknown tool" in blocks[3]["toolResult"]["content"][0]["text"]
+    blocks = llm.calls[2]["messages"][-1]["content"]
+    assert [b["toolResult"]["status"] for b in blocks[:3]] == ["error"] * 3
+    assert "side must be" in blocks[0]["toolResult"]["content"][0]["text"]
+    assert "not an account ID" in blocks[1]["toolResult"]["content"][0]["text"]
+    assert "list of account ID strings" in blocks[2]["toolResult"]["content"][0]["text"]
     assert result["stats"]["fallback"] is False
 
 
@@ -229,9 +249,7 @@ def test_graphs_are_for_case_members_only(monkeypatch):
         turn(
             ("get_case_graph", {"txn_id": "txn_low"})
         ),  # known after a graph, but not a member
-        turn(
-            (SUBMIT, valid_payload(verdict="not_sure", claims=[]))
-        ),
+        turn((SUBMIT, valid_payload(findings=[], next_checks=[]))),
     )
     stub_tools(monkeypatch, ranks={"txn_low": 900, "txn_a": 2})
     result = run_agent(None, llm, case_of("txn_a"))
@@ -256,9 +274,9 @@ def test_more_tool_calls_than_allowed_in_one_step_are_refused(monkeypatch):
 # --- Validation, repair and fallback
 
 
-def test_an_invalid_decision_gets_one_repair(monkeypatch):
+def test_an_invalid_brief_gets_one_repair(monkeypatch):
     bad = valid_payload(
-        claims=[{"code": "FAST_CHAIN", "evidence_ids": ["txn_invented"]}]
+        findings=[{"code": "PASS_THROUGH", "evidence_ids": ["txn_invented"]}]
     )
     llm = ScriptedLLM(
         *good_run()[:2], turn((SUBMIT, bad)), turn((SUBMIT, valid_payload()))
@@ -279,8 +297,8 @@ def test_an_invalid_decision_gets_one_repair(monkeypatch):
     ]
 
 
-def test_a_decision_still_invalid_after_the_repair_falls_back_to_s1(monkeypatch):
-    bad = valid_payload(verdict="arrest")
+def test_a_brief_still_invalid_after_the_repair_falls_back_to_s1(monkeypatch):
+    bad = valid_payload(summary="It moved 5 times.")
     llm = ScriptedLLM(*good_run()[:2], turn((SUBMIT, bad)), turn((SUBMIT, bad)))
     result = run(monkeypatch, llm)
 
@@ -289,11 +307,13 @@ def test_a_decision_still_invalid_after_the_repair_falls_back_to_s1(monkeypatch)
     assert result["stats"]["repair_used"] is True
     assert result["stats"]["model"] == "scripted-model"
     assert result["stats"]["tokens_in"] == 400  # The LLM's tokens are kept.
-    assert result["decision"]["verdict"] == "raise"  # S1: two members and a top neighbour.
-    assert result["decision"]["case_id"] == "case_txn_a"
+    assert result["fallback"] is True
+    assert "PASS_THROUGH" in [f["code"] for f in result["findings"]]  # The code-only brief's rules found it.
+    assert result["case_id"] == "case_txn_a"
+    assert "fixed rules" in result["summary"]  # The code-only template, not the model's words.
     assert "fallback" in tool_names(result, "code")
     fallback = next(s for s in result["trace"] if s["tool"] == "fallback")
-    assert "invalid after one repair" in fallback["result"]["reason"]
+    assert "still invalid after one repair" in fallback["result"]["reason"]
     assert [s["step"] for s in result["trace"]] == list(range(len(result["trace"])))
     assert MODEL_NAME not in json.dumps(result["stats"])
 
@@ -306,17 +326,15 @@ def test_the_last_step_is_forced_to_submit(monkeypatch):
         turn(("get_alert", {"txn_id": "txn_b"})),
         turn((SUBMIT, valid_payload())),
     )
-    result = run(monkeypatch, llm)
+    result = run(monkeypatch, llm, settings=LoopSettings(max_steps=5))
     assert [c["force_tool"] for c in llm.calls] == [None, None, None, None, SUBMIT]
     assert result["stats"]["steps"] == 5
-    assert (
-        "must be submit_decision" in llm.calls[4]["messages"][-1]["content"][-1]["text"]
-    )
+    assert "must be submit_brief" in llm.calls[4]["messages"][-1]["content"][-1]["text"]
 
 
 def test_a_model_that_never_submits_falls_back_after_the_step_limit(monkeypatch):
     llm = ScriptedLLM(*[turn(text="Let me think.") for _ in range(5)])
-    result = run(monkeypatch, llm)
+    result = run(monkeypatch, llm, settings=LoopSettings(max_steps=5))
     assert len(llm.calls) == 5
     assert result["stats"]["fallback"] is True
     assert result["stats"]["steps"] == 5
@@ -330,7 +348,7 @@ def test_a_text_only_step_is_nudged(monkeypatch):
     llm = ScriptedLLM(turn(text="Thinking."), *good_run())
     result = run(monkeypatch, llm)
     nudge = llm.calls[1]["messages"][-1]["content"][0]["text"]
-    assert nudge.startswith("Call a tool or submit_decision")
+    assert nudge.startswith("Call a tool or submit_brief")
     assert result["stats"]["steps"] == 4
 
 
@@ -393,7 +411,7 @@ def test_the_run_timeout_falls_back(monkeypatch):
 
 
 def test_a_repair_that_calls_other_tools_falls_back(monkeypatch):
-    bad = valid_payload(verdict="arrest")
+    bad = valid_payload(summary="It moved 5 times.")
     llm = ScriptedLLM(
         *good_run()[:2],
         turn((SUBMIT, bad)),
@@ -412,10 +430,10 @@ def test_a_single_alert_case_uses_the_alert_as_the_only_member(monkeypatch):
     stub_tools(monkeypatch)
     llm = ScriptedLLM(
         turn(("get_case_graph", {"txn_id": "txn_a"})),
-        turn((SUBMIT, valid_payload(verdict="raise", claims=[]))),
+        turn((SUBMIT, valid_payload(findings=[], next_checks=[]))),
     )
     result = run_agent(None, llm, case)
-    assert result["decision"]["case_id"] is None
+    assert result["case_id"] is None
     assert "single alert" in llm.calls[0]["messages"][0]["content"][0]["text"]
 
 
@@ -427,27 +445,90 @@ def test_an_alert_that_is_not_found_returns_not_found_without_calling_the_model(
     result = run_agent(None, llm, case_of("txn_a"))
     assert llm.calls == []
     assert result["status"] == "not_found"
-    assert result["decision"] is None and result["stats"] is None
+    assert result["summary"] is None and result["stats"] is None
+    assert result["findings"] == [] and result["money_flow"] == []
     assert result["alert"]["found"] is False
 
 
-def test_truncation_and_missing_reasons_are_added_and_cap_confidence(monkeypatch):
-    stub_tools(monkeypatch, truncated=True, reasons=False)
+def test_gaps_are_set_by_code_from_the_tool_flags(monkeypatch):
+    stub_tools(monkeypatch, truncated=True)
     llm = ScriptedLLM(
         turn(("get_case_graph", {"txn_id": "txn_a"})),
         turn(("get_neighbour_scores", {"txn_ids": ["txn_low", "txn_high"]})),
-        turn((SUBMIT, valid_payload(confidence="high"))),
+        # No gap code in the brief: code adds them, and they allow RECHECK_AFTER_MORE_DATA.
+        turn((SUBMIT, valid_payload(next_checks=["RECHECK_AFTER_MORE_DATA"]))),
     )
     result = run_agent(None, llm, case_of("txn_a"))
-    codes = [c["code"] for c in result["decision"]["claims"]]
-    assert {"TRUNCATED_WINDOW", "NO_REASONS_AVAILABLE"} <= set(codes)
-    assert result["decision"]["confidence"] == "medium"
-    assert "runs past the data available" in " ".join(
-        c["sentence"] for c in result["rendered_claims"]
+    assert [g["code"] for g in result["gaps"]] == [
+        "TRUNCATED_WINDOW",
+        "SHORT_OBSERVATION",
+        "SHORT_HISTORY",
+    ]
+    assert "runs past the data available" in result["gaps"][0]["sentence"]
+    assert [c["code"] for c in result["next_checks"]] == ["RECHECK_AFTER_MORE_DATA"]
+    assert result["money_flow"][0]["hours_observed_after_alert"] == 2.0
+
+
+def test_a_brief_that_writes_its_own_gaps_or_money_flow_is_rejected(monkeypatch):
+    bad = valid_payload(gaps=["TRUNCATED_WINDOW"], money_flow=[])
+    llm = ScriptedLLM(*good_run()[:2], turn((SUBMIT, bad)), turn((SUBMIT, valid_payload())))
+    result = run(monkeypatch, llm)
+    assert result["stats"]["validation"] == "repaired"
+    rejection = llm.calls[3]["messages"][-1]["content"][0]["toolResult"]["content"][0]["text"]
+    assert "set by code" in rejection
+
+
+# --- The activity tool and extra accounts
+
+
+def test_account_activity_supports_a_fan_out_finding(monkeypatch):
+    stub_tools(monkeypatch, fan=6)
+    llm = ScriptedLLM(
+        turn(("get_account_activity", {"txn_id": "txn_a", "side": "sender"})),
+        turn(
+            (
+                SUBMIT,
+                valid_payload(
+                    findings=[{"code": "FAN_OUT", "evidence_ids": ["txn_so1", "txn_so2"]}],
+                    next_checks=["CHECK_ONWARD_ACCOUNTS"],
+                ),
+            )
+        ),
     )
+    result = run_agent(None, llm, case_of("txn_a"))
+    assert [f["code"] for f in result["findings"]] == ["FAN_OUT"]
+    assert "6 different accounts" in result["findings"][0]["sentence"]
+    assert result["stats"]["fallback"] is False
+    assert "get_account_activity" in tool_names(result, "llm")
 
 
-# --- Labels never reach the model (PLAN.md rule 2)
+def test_a_fan_out_finding_without_enough_counterparties_is_rejected(monkeypatch):
+    stub_tools(monkeypatch, fan=2)
+    bad = valid_payload(findings=[{"code": "FAN_OUT", "evidence_ids": ["txn_so1"]}])
+    llm = ScriptedLLM(
+        turn(("get_account_activity", {"txn_id": "txn_a", "side": "sender"})),
+        turn((SUBMIT, bad)),
+        turn((SUBMIT, valid_payload(findings=[], next_checks=[]))),
+    )
+    result = run_agent(None, llm, case_of("txn_a"))
+    assert result["stats"]["validation"] == "repaired"
+    rejection = llm.calls[2]["messages"][-1]["content"][0]["toolResult"]["content"][0]["text"]
+    assert "not supported by the tool results" in rejection
+
+
+def test_related_alerts_can_include_accounts_a_tool_returned(monkeypatch):
+    calls = stub_tools(monkeypatch)
+    llm = ScriptedLLM(
+        turn(("get_case_graph", {"txn_id": "txn_a"})),
+        turn(("get_related_alerts", {"txn_id": "txn_a", "accounts": ["3|C"]})),
+        turn((SUBMIT, valid_payload(findings=[], next_checks=[]))),
+    )
+    run_agent(None, llm, case_of("txn_a"))
+    related = next(c for c in calls if c[0] == "get_related_alerts")
+    assert related[1] == ("1|A", "2|B", "3|C")  # The member's own accounts, then the extra.
+
+
+# --- Labels never reach the model
 
 
 def sent_texts(llm):
@@ -471,7 +552,8 @@ def test_nothing_sent_to_the_model_names_a_ground_truth_column(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "tool", ["get_alert", "get_case_graph", "get_neighbour_scores"]
+    "tool",
+    ["get_alert", "get_case_graph", "get_neighbour_scores", "get_account_activity"],
 )
 def test_a_label_in_a_tool_result_stops_the_run_instead_of_reaching_the_model(
     monkeypatch, tool
@@ -488,7 +570,10 @@ def test_a_label_in_a_tool_result_stops_the_run_instead_of_reaching_the_model(
         return result
 
     monkeypatch.setattr(tools, tool, leaky)
-    llm = ScriptedLLM(*good_run())
+    llm = ScriptedLLM(
+        turn(("get_account_activity", {"txn_id": "txn_a", "side": "sender"})),
+        *good_run(),
+    )
     with pytest.raises(LabelLeakError):
         run_agent(None, llm, case_of("txn_a"))
     for text in sent_texts(llm):
@@ -515,7 +600,7 @@ def test_the_policy_prompt_and_tool_text_name_no_ground_truth_column():
 
 def test_loop_settings_follow_the_config():
     settings = LoopSettings()
-    assert settings.max_steps == config.AGENT_MAX_STEPS == 5
+    assert settings.max_steps == config.AGENT_MAX_STEPS == 8
     assert settings.s1.window_h == config.AGENT_WINDOW_H_DEFAULT
     assert loop.TEMPERATURE == 0.0
     assert LLMUsage(1, 2) + LLMUsage(3, 4) == LLMUsage(4, 6)

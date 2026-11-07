@@ -1,6 +1,5 @@
-"""Runs the agent on one alert when an analyst clicks Investigate, and returns the result without
-saving it. It has no end-of-day cutoff, so its verdict can differ from the batch's.
-"""
+"""Runs the agent on one alert when an analyst clicks Investigate and returns the brief unsaved.
+It has no end-of-day cutoff, so it can differ from the batch."""
 
 import threading
 
@@ -36,7 +35,7 @@ def investigate(
     llm: AgentLLM | None = None,
     spend: SpendGuard | None = None,
 ) -> InvestigateResult:
-    """Triage one alert. Takes 20 seconds or more, so show a spinner.
+    """Investigate one alert. Takes 20 seconds or more, so show a spinner.
 
     ``txn_date`` is required. ``window_h`` must be 6-72 or ValueError is raised. An ID or date that
     is malformed or not found gives ``status="not_found"``.
@@ -55,12 +54,14 @@ def investigate(
             alert=Alert(
                 found=False, txn_id=str(txn_id), txn_date=str(txn_date), ids=[]
             ),
-            decision=None,
-            rendered_claims=[],
-            graph=None,
-            neighbours=None,
-            related=None,
+            case_id=None,
+            summary=None,
+            findings=[],
+            gaps=[],
+            next_checks=[],
+            money_flow=[],
             members=[],
+            fallback=False,
             stats=None,
             trace=[],
         )

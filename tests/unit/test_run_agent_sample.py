@@ -9,7 +9,7 @@ from scripts.run_agent_sample import (
 def result(
     validation="valid",
     *,
-    verdict="raise",
+    findings=("PASS_THROUGH",),
     tokens=(1000, 200),
     reason=None,
     errors=(),
@@ -18,7 +18,7 @@ def result(
     if errors:
         trace.append(
             {
-                "tool": "submit_decision",
+                "tool": "submit_brief",
                 "result": {"valid": False, "errors": list(errors)},
             }
         )
@@ -26,10 +26,8 @@ def result(
         trace.append({"tool": "fallback", "result": {"reason": reason}})
     return {
         "status": "ok",
-        "decision": {
-            "verdict": verdict,
-            "confidence": "low",
-        },
+        "findings": [{"code": code} for code in findings],
+        "gaps": [{"code": "TRUNCATED_WINDOW"}],
         "stats": {
             "validation": validation,
             "fallback": validation == "fallback",
@@ -49,7 +47,7 @@ def test_rates_count_each_outcome_over_finished_runs():
         result("repaired", errors=["bad id"]),
         result(
             "fallback",
-            reason="Decision still invalid after one repair.",
+            reason="Brief still invalid after one repair.",
             errors=["bad id", "bad id"],
         ),
     ]
@@ -61,9 +59,9 @@ def test_rates_count_each_outcome_over_finished_runs():
         summary["fallback_rate"],
     ) == (0.5, 0.25, 0.25)
     assert summary["fallback_reasons"] == {
-        "Decision still invalid after one repair.": 1
+        "Brief still invalid after one repair.": 1
     }
-    assert summary["rejected_decision_reasons"] == {"bad id": 3}
+    assert summary["rejected_brief_reasons"] == {"bad id": 3}
     assert summary["estimated_usd_per_run"] == 0.25
 
 
@@ -80,7 +78,7 @@ def test_errored_and_missing_cases_are_counted_separately():
     summary = summarise_runs(
         [
             result(),
-            {"status": "not_found", "stats": None, "decision": None, "trace": []},
+            {"status": "not_found", "stats": None, "findings": [], "gaps": [], "trace": []},
         ],
         [{"error": "boom"}],
         0.5,
@@ -89,6 +87,15 @@ def test_errored_and_missing_cases_are_counted_separately():
     assert summary["cases_failed_with_error"] == 1
     assert summary["not_found"] == 1
     assert summary["valid_rate"] == 1.0
+
+
+def test_findings_and_gaps_are_counted():
+    summary = summarise_runs(
+        [result(), result(findings=("PASS_THROUGH", "FAN_OUT")), result(findings=())], [], 0
+    )
+    assert summary["finding_counts"] == {"PASS_THROUGH": 2, "FAN_OUT": 1}
+    assert summary["cases_with_findings"] == 2
+    assert summary["gap_counts"] == {"TRUNCATED_WINDOW": 3}
 
 
 def test_no_runs_gives_no_rates():

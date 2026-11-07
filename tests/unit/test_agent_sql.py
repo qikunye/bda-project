@@ -18,6 +18,8 @@ def all_builder_outputs():
         sql.build_case_graph_query(SENDER, RECEIVER, "2022-09-14 10:00:00.000", 48),
         sql.build_neighbour_scores_query([TXN], ["2022-09-14"]),
         sql.build_day_queue_query("2022-09-15", 500),
+        sql.build_account_activity_query(SENDER, TXN, TS, 48),
+        sql.build_account_history_query(SENDER, TS),
     ]
 
 
@@ -55,7 +57,8 @@ def test_alert_query_hits_one_partition_and_one_id():
     statement = sql.build_alert_query(TXN, "2022-09-14")
     assert "txn_date = DATE '2022-09-14'" in statement
     assert f"transaction_id = '{TXN}'" in statement
-    assert "feature_1" in statement and "amount_paid" in statement
+    assert "amount_paid" in statement
+    assert "feature_1" not in statement and "reason_1" not in statement
 
 
 def test_case_graph_query_follows_the_bq2_window_rule():
@@ -95,7 +98,7 @@ def test_neighbour_query_filters_dates_and_ids():
     )
     assert "IN (DATE '2022-09-14', DATE '2022-09-15')" in statement
     assert f"IN ('{TXN}', 'txn_b')" in statement
-    assert "feature_1 IS NOT NULL AS has_reasons" in statement
+    assert "has_reasons" not in statement and "feature_1" not in statement
 
 
 def test_day_queue_query_limits_to_top_k():
@@ -123,3 +126,35 @@ def test_day_queue_query_limits_to_top_k():
 def test_builders_reject_bad_input(call):
     with pytest.raises(ValueError):
         call()
+
+
+def test_account_activity_query_covers_both_directions_of_one_account():
+    statement = " ".join(sql.build_account_activity_query(SENDER, TXN, TS, 6).split())
+    assert f"account_key = '{SENDER}'" in statement
+    assert "direction = " not in statement  # Both directions come back, labelled.
+    assert f"transaction_id <> '{TXN}'" in statement
+    assert "txn_date BETWEEN DATE '2022-09-14' AND DATE '2022-09-14'" in statement
+    assert "TIMESTAMP '2022-09-14 04:00:00' AND TIMESTAMP '2022-09-14 16:00:00'" in statement
+
+
+def test_account_activity_query_never_reaches_past_a_cutoff():
+    statement = sql.build_account_activity_query(
+        SENDER, TXN, TS, 48, as_of="2022-09-14 23:59:59"
+    )
+    assert "TIMESTAMP '2022-09-14 23:59:59'" in statement
+    assert "2022-09-16" not in statement
+
+
+def test_account_activity_query_rejects_bad_input():
+    with pytest.raises(ValueError):
+        sql.build_account_activity_query("x'; DROP TABLE t; --", TXN, TS, 48)
+    with pytest.raises(ValueError):
+        sql.build_account_activity_query(SENDER, "txn_1' OR '1'='1", TS, 48)
+    with pytest.raises(ValueError):
+        sql.build_account_activity_query(SENDER, TXN, TS, 500)
+
+
+def test_account_history_query_stops_before_the_alert_day():
+    statement = " ".join(sql.build_account_history_query(SENDER, TS).split())
+    assert "txn_date BETWEEN DATE '2022-09-11' AND DATE '2022-09-13'" in statement
+    assert "GROUP BY txn_date, direction, payment_currency" in statement

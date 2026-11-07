@@ -1,9 +1,5 @@
-"""Triage a day's top alerts as cases and save the results to DynamoDB and S3.
-It is a dry run unless you pass --save. Needs an AWS login, and spends money on Athena and Bedrock.
-
-Example: python -m scripts.run_batch --day 2022-09-14 --out /tmp/batch.json          (dry run)
-         python -m scripts.run_batch --day 2022-09-14 --save                          (writes)
-"""
+"""Writes an evidence brief for each case among a day's top alerts and optionally saves it.
+Dry run unless you pass --save. Needs an AWS login and spends money on Athena and Bedrock."""
 
 import argparse
 import json
@@ -65,7 +61,9 @@ def main() -> int:
         label = (
             f"ERROR {outcome!r}"
             if isinstance(outcome, Exception)
-            else (outcome["decision"] or {}).get("verdict", outcome["status"])
+            else f"{len(outcome['findings'])} findings"
+            if outcome["status"] == "ok"
+            else outcome["status"]
         )
         print(
             f"[{done}/{total}] {case.case_id}: {label} (spend US${spend.spent_usd:.2f})"

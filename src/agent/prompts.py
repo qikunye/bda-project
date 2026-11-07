@@ -5,66 +5,68 @@ name a label column.
 import json
 
 from src import config
+from src.agent.brief import NEXT_CHECK_CODES, NEXT_CHECK_NEEDS
 from src.agent.cases import Case
 from src.agent.contracts import Alert
+from src.agent.findings import FINDING_CODES, REQUIREMENTS
 from src.agent.llm import ToolDefinition
-from src.agent.validate import CLAIM_CODES, VERDICTS
 
-SUBMIT = "submit_decision"
+SUBMIT = "submit_brief"
+
+_FINDING_HELP = "\n".join(f"  - {code}: {REQUIREMENTS[code]}" for code in FINDING_CODES)
+_NEXT_CHECK_HELP = "\n".join(
+    f"  - {code}: only with {' or '.join(sorted(NEXT_CHECK_NEEDS[code]))}"
+    for code in NEXT_CHECK_CODES
+)
+_GAP_HELP = f"""\
+  - NO_GRAPH_AVAILABLE: the representative's get_case_graph has no_graph true.
+  - TRUNCATED_WINDOW: a graph or activity result has window_truncated true.
+  - SHORT_OBSERVATION: hours_observed_after_alert is below {config.AGENT_MIN_HOURS_OBSERVED:g}.
+  - SHORT_HISTORY: you did not call get_account_activity, or history_days is below {config.AGENT_MIN_HISTORY_DAYS}."""
 
 SYSTEM_PROMPT = f"""\
-You are a triage assistant for an anti-money-laundering analyst team. You decide whether one alert, \
-and the small case of alerts it belongs to, is worth an analyst's time, and what else belongs with it. \
+You are an investigation assistant for an anti-money-laundering analyst team. A risk model has \
+already ranked the day's transactions, and the analyst sees them in that order. You do not decide \
+whether an alert is worth raising. You gather the payment evidence around one alert, and the small \
+case of alerts it belongs to, and write a short brief so the analyst need not look it up by hand. \
 You do not make accusations.
 
 What you have
-- A risk model ranks each day's transactions. Day rank 1 is the riskiest transaction of the day. \
-The day's top {config.AGENT_TOP_K} are the queue. For the highest-ranked alerts the model also gives up \
-to three reasons. The reasons explain the model's score. They are not proof of anything.
+- Day rank 1 is the riskiest transaction of the day. The day's top {config.AGENT_TOP_K} are the queue. \
+You are not shown why the model scored an alert.
 - Read-only tools over the payment data. Upstream payments are payments into the alert's sender before \
-the alert. Downstream payments are payments out of its receiver after it.
+the alert. Downstream payments are payments out of its receiver after it. Account activity is the \
+sender's or receiver's other payments, in and out, around the alert, plus its daily counts on earlier days.
 - You know nothing about which transactions are really illicit, and you must not guess. \
 The data is synthetic.
 
 Rules
-- Decide only from tool results and the case facts in the first message. Use no outside knowledge.
-- Cite only IDs that tool results returned. Code checks every ID and rejects the decision if one was \
-not returned.
-- Write no numbers of your own. Code builds the displayed explanation from your claim codes and the \
-tool results. The optional note is at most {config.AGENT_NOTE_MAX_CHARS} characters and must contain no \
-digits or numbers spelled out as words, so keep amounts, counts, ranks, times and IDs out of it. Leave the note out unless it adds \
-something the claims cannot say.
+- Use only tool results and the case facts in the first message. Use no outside knowledge.
+- Cite only IDs that tool results returned. Code checks every finding against fixed rules and rejects \
+the brief if a finding is not supported or an ID was not returned.
+- Write no numbers of your own. Code builds every displayed sentence, the money flow and the gaps from \
+tool results. Your summary is one short sentence of at most {config.AGENT_SUMMARY_MAX_CHARS} characters \
+with no digits and no numbers spelled out as words, so keep amounts, counts, ranks, times and IDs out of it.
 - Never add amounts across currencies.
-- You have at most {config.AGENT_MAX_STEPS} steps. A step is one reply of yours, and it may contain several \
-independent tool calls. Your last step must be {SUBMIT}. Usually: fetch the graph, then the neighbour \
-scores, then decide.
+- You have at most {config.AGENT_MAX_STEPS} steps. A step is one reply of yours, and it may contain \
+several independent tool calls. Your last step must be {SUBMIT}.
+- Usual plan: get_case_graph for the representative, get_account_activity for its sender and receiver, \
+get_neighbour_scores for the payments the graph listed, get_related_alerts, then submit. Fetch other case \
+members' graphs when the representative's has no payments or the case is small enough to cover.
 
-How to decide
-Your verdict says whether the analyst should look at this case today. Code already groups related \
-alerts, so you never merge anything. Every alert here already ranks high, so a high rank and the model's \
-reasons are not enough on their own. Raise only the cases that stand out from the rest of the queue.
-- raise: a graph has payments, and they are consistent with the model's reasons or there are no reasons \
-to check, and the results also show at least one further signal: FAST_CHAIN, NEIGHBOURS_HIGH_RISK or \
-REPEAT_ACCOUNT_ALERTS. Code rejects a raise when no graph you fetched has payments.
-- dont_raise: a graph has payments, they do not support the model's reasons, and none of those further \
-signals appears. Claim REASONS_NOT_SUPPORTED. A truncated window does not change this: claim \
-TRUNCATED_WINDOW and still use dont_raise. This only moves the case down the list. It never removes the \
-case, so use it when the results point that way.
-- not_sure: anything else. That includes payments that fit the reasons with no further signal, mixed \
-signals, and no graph. A missing graph does not show the alert is harmless, and repeat alerts cannot make \
-up for it, so say so with the matching claim code and keep your confidence low.
-- If the representative's graph has no payments, fetch the other case members' graphs before deciding.
-- The graph shows only payments known when this review runs, so later ones may be unseen. Say so with \
-the matching claim code when window_truncated is true. That alone is no reason to avoid a verdict.
-
-Claim codes: pick the ones that are true, cite the IDs that show them.
-- REASONS_CORROBORATED: the graph is consistent with the model's reasons. Needs reasons and a graph.
-- REASONS_NOT_SUPPORTED: the graph shows nothing that supports the reasons.
-- NEIGHBOURS_HIGH_RISK: cite neighbours that get_neighbour_scores shows in the day's top {config.AGENT_TOP_K}.
-- FAST_CHAIN: cite payments from the graph that happen soon before or after the alert.
-- REPEAT_ACCOUNT_ALERTS: cite other top alerts from get_related_alerts.
-- NO_GRAPH_AVAILABLE, TRUNCATED_WINDOW, NO_REASONS_AVAILABLE: only when the tool flags say so \
-(no_graph, window_truncated, reasons null). Code adds them when the flags are true.
+The brief
+- findings: patterns the results show. Pick only the ones that are true, and cite the IDs that show them. \
+An empty list is a fine answer: it means no pattern was found, not that the alert is harmless.
+{_FINDING_HELP}
+- gaps: code sets these from the tool results. You never write them, but they decide which next checks \
+you may pick, so call the tools that avoid a gap when you can (for example, get_account_activity avoids \
+SHORT_HISTORY).
+{_GAP_HELP}
+- next_checks: what the analyst should look at next. Pick only ones that fit your findings or the gaps \
+above.
+{_NEXT_CHECK_HELP}
+- summary: one short sentence that sums up the evidence and says nothing the findings do not.
+- Do not write gaps, money flow or case_id in the brief. Code adds them.
 """
 
 _TXN_ID = {"type": "string", "description": "A transaction ID returned by a tool."}
@@ -79,9 +81,9 @@ TOOLS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         name="get_alert",
         description=(
-            "Score, day rank, the model's reasons (or null) and payment details of one "
-            "transaction. The representative alert is already given in the first message. "
-            "Use this for other case members or for neighbours the graph listed."
+            "Score, day rank and payment details of one transaction. The representative alert "
+            "is already given in the first message. Use this for other case members or for "
+            "neighbours the graph listed."
         ),
         input_schema={
             "type": "object",
@@ -93,15 +95,45 @@ TOOLS: tuple[ToolDefinition, ...] = (
         name="get_case_graph",
         description=(
             "Payments into the sender before the alert (upstream) and out of the receiver after it "
-            "(downstream) within the window, for a case member. Gives counts, totals per currency "
-            "and flags: no_graph (no payments found), window_truncated (the window runs past the "
-            "data available to this review), edges_capped (only the first "
+            "(downstream) within the window, for a case member. Gives counts, totals per currency, "
+            "and flow per currency: the share of the money paid in that went on, and the fastest and "
+            "median gap in minutes from the alert to an onward payment. returned_to_source lists "
+            "onward payments that went back to the alert's sender or to an account that had paid "
+            "it. hours_observed_after_alert says how much time after the alert the data covers: no "
+            "onward payment only means something if it is large. Flags: no_graph (no payments "
+            "found), window_truncated (the window runs past the data available to this review), "
+            "edges_capped (only the first "
             f"{config.AGENT_MAX_EDGES_PER_DIRECTION} payments per direction are listed)."
         ),
         input_schema={
             "type": "object",
             "properties": {"txn_id": _TXN_ID, "window_h": _WINDOW},
             "required": ["txn_id"],
+        },
+    ),
+    ToolDefinition(
+        name="get_account_activity",
+        description=(
+            "The other payments of a case member's sender or receiver, in and out, within the window "
+            "either side of the alert (the alert itself is left out). Gives counts, distinct "
+            "counterparties and totals per currency, the nearest "
+            f"{config.AGENT_MAX_EDGES_PER_DIRECTION} payments per direction, and daily counts and "
+            "totals for the whole days before the alert's day (history_days says how many days). "
+            "Use it to see whether an account pays many accounts, is paid by many, or is busier than "
+            "usual."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "txn_id": _TXN_ID,
+                "side": {
+                    "type": "string",
+                    "enum": ["sender", "receiver"],
+                    "description": "Whose payments: the alert's sender or its receiver.",
+                },
+                "window_h": _WINDOW,
+            },
+            "required": ["txn_id", "side"],
         },
     ),
     ToolDefinition(
@@ -127,46 +159,62 @@ TOOLS: tuple[ToolDefinition, ...] = (
         name="get_related_alerts",
         description=(
             f"Other alerts in the day's top {config.AGENT_TOP_K} that touch the sender or receiver "
-            "of a case member within the window."
+            "of a case member within the window. Pass accounts to include more accounts, such as "
+            "counterparties that a graph or activity result listed "
+            f"(at most {config.AGENT_MAX_RELATED_ACCOUNTS} in all)."
         ),
         input_schema={
             "type": "object",
-            "properties": {"txn_id": _TXN_ID, "window_h": _WINDOW},
+            "properties": {
+                "txn_id": _TXN_ID,
+                "window_h": _WINDOW,
+                "accounts": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "description": "An account ID returned by a tool.",
+                    },
+                    "maxItems": config.AGENT_MAX_RELATED_ACCOUNTS - 2,
+                },
+            },
             "required": ["txn_id"],
         },
     ),
     ToolDefinition(
         name=SUBMIT,
         description=(
-            "Give the final decision for the case. Code checks it. If it fails you get the "
+            "Give the final brief for the case. Code checks it. If it fails you get the "
             "reasons and one chance to correct it."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "verdict": {"type": "string", "enum": sorted(VERDICTS)},
-                "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
-                "claims": {
+                "findings": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "properties": {
-                            "code": {"type": "string", "enum": sorted(CLAIM_CODES)},
+                            "code": {"type": "string", "enum": list(FINDING_CODES)},
                             "evidence_ids": {
                                 "type": "array",
                                 "items": {"type": "string"},
+                                "maxItems": config.AGENT_MAX_EVIDENCE_IDS,
                             },
                         },
                         "required": ["code", "evidence_ids"],
                     },
                 },
-                "note": {
+                "next_checks": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(NEXT_CHECK_CODES)},
+                },
+                "summary": {
                     "type": "string",
-                    "maxLength": config.AGENT_NOTE_MAX_CHARS,
-                    "description": "Optional. Must contain no digits or numbers spelled out as words.",
+                    "maxLength": config.AGENT_SUMMARY_MAX_CHARS,
+                    "description": "One short sentence. Must contain no digits or numbers spelled out as words.",
                 },
             },
-            "required": ["verdict", "confidence", "claims"],
+            "required": ["findings", "next_checks", "summary"],
         },
     ),
 )
@@ -198,7 +246,7 @@ def seed_message(case: Case, seed: Alert, *, window_h: int) -> str:
     else:
         case_line = "This is a single alert, not grouped with others."
     return (
-        f"Triage this case. Day: {case.txn_date}. Default window: {window_h} h.\n"
+        f"Investigate this case. Day: {case.txn_date}. Default window: {window_h} h.\n"
         f"{case_line}\n"
         f"Representative alert: {case.representative_txn_id}. Its get_alert result:\n"
         f"{tool_result_view(seed)}\n"

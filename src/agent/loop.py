@@ -1,6 +1,5 @@
-"""Runs the LLM on one case: it calls tools for up to 5 steps, then submits a decision that gets
-checked. If the decision stays invalid or a limit is hit, the fixed rules decide instead.
-"""
+"""Runs the LLM on one case: it calls tools for a few steps, then submits a brief that code checks.
+If the brief stays invalid or a limit is hit, the code-only brief is used instead."""
 
 import json
 import time
@@ -8,14 +7,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from src import config
-from src.agent import baseline, prompts, tools
+from src.agent import baseline, brief, findings, prompts, tools
+from src.agent.brief import case_id_for
 from src.agent.cases import Case
-from src.agent.claims import case_id_for, render_claims
 from src.agent.contracts import (
     Alert,
     CaseMember,
     InvestigateResult,
-    NeighbourScores,
     RunStats,
     TraceStep,
     ValidationOutcome,
@@ -30,8 +28,9 @@ from src.agent.llm import (
     SpendGuard,
     ToolCall,
 )
+from src.agent.evidence import RunEvidence
 from src.agent.sql import assert_label_free, validate_window_hours
-from src.agent.validate import RunEvidence, validate_decision
+from src.agent.validate import validate_brief
 
 TEMPERATURE = 0.0
 
@@ -43,7 +42,7 @@ class LoopSettings:
     max_output_tokens: int = config.AGENT_MAX_OUTPUT_TOKENS
     run_token_cap: int = config.AGENT_RUN_TOKEN_CAP
     timeout_s: float = config.AGENT_RUN_TIMEOUT_S
-    # Window, top K and thresholds are shared with S1, so the fallback sees the same case.
+    # Window, top K and thresholds are shared with the code-only brief, so the fallback sees the same case.
     s1: baseline.Settings = field(default_factory=baseline.Settings)
 
 
@@ -52,7 +51,7 @@ class ToolInputError(ValueError):
 
 
 class _FallbackNeeded(Exception):
-    """Stops the LLM loop so S1 decides instead. The message is the reason."""
+    """Stops the LLM loop so the code-only brief is used instead. The message is the reason."""
 
 
 def single_alert_case(txn_id: str, txn_date: str) -> Case:
@@ -62,7 +61,7 @@ def single_alert_case(txn_id: str, txn_date: str) -> Case:
 
 
 def _label_free(text: str) -> str:
-    """Raises if the text mentions a ground-truth column (rule 2)."""
+    """Raises if the text mentions a ground-truth column, so labels never reach the model."""
 
     return assert_label_free(text)
 
@@ -162,6 +161,21 @@ class _Run:
             raise ToolInputError(f"{txn_id} is not a member of this case.")
         return txn_id
 
+    def _extra_accounts(self, args: dict) -> list[str]:
+        """Accounts the model adds to a related-alerts search. Each must be one a tool returned."""
+
+        accounts = args.get("accounts")
+        if accounts is None:
+            return []
+        if not isinstance(accounts, list) or not all(isinstance(a, str) for a in accounts):
+            raise ToolInputError("accounts must be a list of account ID strings.")
+        unknown = [a for a in accounts if a not in self.evidence.known_ids]
+        if unknown:
+            raise ToolInputError(
+                f"{unknown[:3]} is not an account ID from a tool result so far."
+            )
+        return accounts
+
     def _window(self, args: dict) -> int:
         try:
             return validate_window_hours(
@@ -189,6 +203,18 @@ class _Run:
                 result = tools.get_case_graph(
                     self.data, alert, self._window(args), as_of=self.settings.s1.as_of
                 )
+            elif call.name == "get_account_activity":
+                alert = self._member_alert(self._member(args.get("txn_id")))
+                side = args.get("side")
+                if side not in ("sender", "receiver"):
+                    raise ToolInputError("side must be 'sender' or 'receiver'.")
+                result = tools.get_account_activity(
+                    self.data,
+                    alert,
+                    side,
+                    self._window(args),
+                    as_of=self.settings.s1.as_of,
+                )
             elif call.name == "get_neighbour_scores":
                 txn_ids = args.get("txn_ids")
                 if (
@@ -211,7 +237,7 @@ class _Run:
                 alert = self._member_alert(txn_id)
                 result = tools.get_related_alerts(
                     self.data,
-                    [alert["sender"], alert["receiver"]],
+                    [alert["sender"], alert["receiver"], *self._extra_accounts(args)],
                     alert["ts"],
                     self._window(args),
                     exclude_txn_ids=(txn_id,),
@@ -233,7 +259,7 @@ class _Run:
         """Every alert in the case with its payments, for the analyst.
 
         Code fetches any graph the LLM skipped. These never reach the LLM or the validator, because
-        the decision is already made.
+        the brief is already made.
         """
 
         members: list[CaseMember] = []
@@ -266,12 +292,14 @@ def _not_found(
         txn_date=case.txn_date,
         window_h=window_h,
         alert=seed,
-        decision=None,
-        rendered_claims=[],
-        graph=None,
-        neighbours=None,
-        related=None,
+        case_id=None,
+        summary=None,
+        findings=[],
+        gaps=[],
+        next_checks=[],
+        money_flow=[],
         members=[],
+        fallback=False,
         stats=None,
         trace=trace,
     )
@@ -287,7 +315,7 @@ def _fallback_result(
     repair_used: bool,
     started: float,
 ) -> InvestigateResult:
-    """The S1 decision, keeping the model's trace and token counts."""
+    """The code-only brief, keeping the model's trace and token counts."""
 
     llm_trace = list(run.trace)
     llm_trace.append(
@@ -300,10 +328,11 @@ def _fallback_result(
             latency_ms=0,
         )
     )
-    s1 = baseline.triage_case(run.data, run.case, run.settings.s1)
+    s1 = baseline.brief_case(run.data, run.case, run.settings.s1)
     for step in s1["trace"]:
         llm_trace.append({**step, "step": len(llm_trace)})
     s1["trace"] = llm_trace
+    s1["fallback"] = True
     s1["stats"] = RunStats(
         model=llm.model_id,
         steps=steps,
@@ -333,8 +362,8 @@ def run_agent(
     spend: SpendGuard | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> InvestigateResult:
-    """Triages one case with the LLM and returns a checked decision, or S1's if the LLM fails or hits a limit.
-    A label leak or data error raises instead.
+    """Investigates one case with the LLM and returns a checked brief, or the code-only brief if the LLM
+    fails or hits a limit. A label leak or data error raises instead.
     """
 
     settings = settings or LoopSettings()
@@ -358,12 +387,12 @@ def run_agent(
     steps = 0
     repair_used = False
     repairing = False
-    decision = None
+    submitted = None
 
     try:
-        while decision is None:
+        while submitted is None:
             if not repairing and steps >= settings.max_steps:
-                raise _FallbackNeeded("No decision within the step limit.")
+                raise _FallbackNeeded("No brief within the step limit.")
             if usage.input_tokens + usage.output_tokens >= settings.run_token_cap:
                 raise _FallbackNeeded("Run token cap reached.")
             if clock() - started > settings.timeout_s:
@@ -389,7 +418,7 @@ def run_agent(
 
             if not turn.tool_calls:
                 if repairing:
-                    raise _FallbackNeeded("No decision after the repair request.")
+                    raise _FallbackNeeded("No brief after the repair request.")
                 messages.append(
                     {
                         "role": "user",
@@ -407,7 +436,7 @@ def run_agent(
             )
             if submit is None:
                 if repairing:
-                    raise _FallbackNeeded("No decision after the repair request.")
+                    raise _FallbackNeeded("No brief after the repair request.")
                 blocks = []
                 for index, call in enumerate(turn.tool_calls):
                     if index >= settings.max_parallel_calls:
@@ -426,34 +455,30 @@ def run_agent(
                 continue
 
             started_submit = clock()
-            validated = validate_decision(submit.input, run.evidence)
+            validated = validate_brief(submit.input, run.evidence)
             run.log(
                 "llm",
                 prompts.SUBMIT,
                 dict(submit.input),
-                {
-                    "valid": validated.ok,
-                    "errors": list(validated.errors),
-                    "adjustments": list(validated.adjustments),
-                },
+                {"valid": validated.ok, "errors": list(validated.errors)},
                 started_submit,
             )
             if validated.ok:
-                decision = validated.decision
+                submitted = validated.brief
                 break
             if repair_used:
-                raise _FallbackNeeded("Decision still invalid after one repair.")
+                raise _FallbackNeeded("Brief still invalid after one repair.")
 
             repair_used = repairing = True
             problems = "\n".join(f"- {e}" for e in validated.errors)
             blocks = [
                 _tool_result_block(
                     call,
-                    "Decision rejected:\n"
+                    "Brief rejected:\n"
                     + problems
-                    + "\nCall submit_decision again with these fixed."
+                    + f"\nCall {prompts.SUBMIT} again with these fixed."
                     if call is submit
-                    else "Not run: the decision is being corrected.",
+                    else "Not run: the brief is being corrected.",
                     error=True,
                 )
                 for call in turn.tool_calls
@@ -466,10 +491,10 @@ def run_agent(
     except SpendCapReached as error:
         reason = str(error)
     else:
-        return _decided_result(
+        return _briefed_result(
             run,
             llm,
-            decision,
+            submitted,
             usage=usage,
             steps=steps,
             repair_used=repair_used,
@@ -487,25 +512,22 @@ def run_agent(
     )
 
 
-def _decided_result(
+def _briefed_result(
     run: _Run,
     llm: AgentLLM,
-    decision,
+    submitted,
     *,
     usage: LLMUsage,
     steps: int,
     repair_used: bool,
     started: float,
 ) -> InvestigateResult:
+    """Adds what code writes (sentences, gaps, money flow, case_id) to the LLM's checked brief."""
+
     evidence = run.evidence
-    graph = evidence.graphs.get(run.case.representative_txn_id)
-    neighbours = (
-        NeighbourScores(
-            neighbours=list(evidence.neighbours.values()), ids=list(evidence.neighbours)
-        )
-        if evidence.neighbours
-        else None
-    )
+    instances = findings.detect(evidence)
+    submitted_findings = [(f["code"], f["evidence_ids"]) for f in submitted["findings"]]
+    gaps = brief.compute_gaps(evidence)
     validation: ValidationOutcome = "repaired" if repair_used else "valid"
     members = run.case_members()
     return InvestigateResult(
@@ -514,18 +536,16 @@ def _decided_result(
         txn_date=run.case.txn_date,
         window_h=run.settings.s1.window_h,
         alert=evidence.alerts[run.case.representative_txn_id],
-        decision=decision,
-        rendered_claims=render_claims(
-            decision,
-            graph=graph,
-            neighbours=neighbours,
-            related=evidence.related,
-            member_graphs=[member["graph"] for member in members],
-        ),
-        graph=graph,
-        neighbours=neighbours,
-        related=evidence.related,
+        case_id=case_id_for(run.case.representative_txn_id)
+        if len(run.case.member_txn_ids) > 1
+        else None,
+        summary=submitted["summary"],
+        findings=brief.render_findings(submitted_findings, instances),
+        gaps=gaps,
+        next_checks=brief.render_next_checks(submitted["next_checks"]),
+        money_flow=brief.build_money_flow(members),
         members=members,
+        fallback=False,
         stats=RunStats(
             model=llm.model_id,
             steps=steps,

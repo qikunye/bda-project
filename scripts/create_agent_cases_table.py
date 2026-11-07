@@ -1,6 +1,5 @@
-"""Create the DynamoDB table is459_agent_cases (key: day + case_id) if it does not exist.
-Safe to run again. On-demand billing, tagged like is459_agent_decisions.
-"""
+"""Creates the is459_agent_cases DynamoDB table (key: day + case_id) if it is missing.
+Safe to run again."""
 
 import sys
 
