@@ -66,6 +66,12 @@ SHORT_HISTORY).
 above.
 {_NEXT_CHECK_HELP}
 - summary: one short sentence that sums up the evidence and says nothing the findings do not.
+- observations: up to {config.AGENT_MAX_OBSERVATIONS} short remarks of your own about what the results \
+show beyond the findings, such as how payments or accounts relate to each other or something odd in the \
+timing. Cite the IDs each one is about. Hedge ("appears", "may"). The analyst sees them as your reading, \
+not as checked facts, so do not repeat a finding. Each is at most {config.AGENT_OBSERVATION_MAX_CHARS} \
+characters, with no digits, no numbers spelled out as words, and no accusation or verdict (words such as \
+laundering, fraud, illicit and criminal are rejected). Leave the list empty if you have nothing to add.
 - Do not write gaps, money flow or case_id in the brief. Code adds them.
 """
 
@@ -96,8 +102,8 @@ TOOLS: tuple[ToolDefinition, ...] = (
         description=(
             "Payments into the sender before the alert (upstream) and out of the receiver after it "
             "(downstream) within the window, for a case member. Gives counts, totals per currency, "
-            "and flow per currency: the share of the money paid in that went on, and the fastest and "
-            "median gap in minutes from the alert to an onward payment. returned_to_source lists "
+            "and flow per currency: onward payments as a share of the alert amount (alert's "
+            "currency only), and the fastest and median gap in minutes from the alert to an onward payment. returned_to_source lists "
             "onward payments that went back to the alert's sender or to an account that had paid "
             "it. hours_observed_after_alert says how much time after the alert the data covers: no "
             "onward payment only means something if it is large. Flags: no_graph (no payments "
@@ -212,6 +218,27 @@ TOOLS: tuple[ToolDefinition, ...] = (
                     "type": "string",
                     "maxLength": config.AGENT_SUMMARY_MAX_CHARS,
                     "description": "One short sentence. Must contain no digits or numbers spelled out as words.",
+                },
+                "observations": {
+                    "type": "array",
+                    "maxItems": config.AGENT_MAX_OBSERVATIONS,
+                    "description": "Optional. Your own remarks beyond the findings, shown as your reading.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "maxLength": config.AGENT_OBSERVATION_MAX_CHARS,
+                                "description": "No digits, numbers spelled out, or accusations.",
+                            },
+                            "evidence_ids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "maxItems": config.AGENT_MAX_EVIDENCE_IDS,
+                            },
+                        },
+                        "required": ["text", "evidence_ids"],
+                    },
                 },
             },
             "required": ["findings", "next_checks", "summary"],

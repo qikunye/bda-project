@@ -143,7 +143,7 @@ def test_totals_stay_per_currency():
 
 def test_sentences_take_numbers_from_tool_results():
     sentences = {f["code"]: f["sentence"] for f in SAMPLES["pass_through"]["findings"]}
-    assert "90% of what came in" in sentences["PASS_THROUGH"]
+    assert "72% of the alert amount" in sentences["PASS_THROUGH"]
     assert "25 minutes after the alert" in sentences["PASS_THROUGH"]
     fan = {f["code"]: f["sentence"] for f in SAMPLES["fan_out_case"]["findings"]}
     assert "6 different accounts (6 payments)" in fan["FAN_OUT"]
@@ -218,3 +218,35 @@ def test_stored_rows_suit_dynamodb():
         assert set(row) <= set(DecisionRow.__annotations__)
         assert not floats(row)
         assert not set(all_keys(row)) & config.AGENT_FORBIDDEN_COLUMNS
+
+
+# --- Observations
+
+
+def test_llm_style_samples_show_observations_and_code_only_ones_have_none():
+    assert SAMPLES["fan_out_case"]["observations"] and SAMPLES["money_returns"]["observations"]
+    for name in ("code_only", "fallback", "pass_through", "no_graph", "not_found"):
+        assert SAMPLES[name]["observations"] == [], name
+
+
+@pytest.mark.parametrize("name", OK_SAMPLES)
+def test_sample_observations_cite_tool_ids_and_carry_no_numbers(name):
+    result, known = OK_SAMPLES[name], tool_ids(OK_SAMPLES[name])
+    for remark in result["observations"]:
+        assert set(remark) == {"text", "evidence_ids"}
+        assert remark["evidence_ids"] and set(remark["evidence_ids"]) <= known
+        assert not re.search(r"\d", remark["text"])
+        assert len(remark["text"]) <= config.AGENT_OBSERVATION_MAX_CHARS
+    assert len(result["observations"]) <= config.AGENT_MAX_OBSERVATIONS
+
+
+def test_rows_count_observations_without_storing_their_text():
+    [row] = [
+        r
+        for r in build_decision_rows(SAMPLES["money_returns"], run_id="r", created_at="t")
+        if r["role"] == "representative"
+    ]
+    assert row["observation_count"] == 1
+    assert "observations" not in row
+    code_only = build_decision_rows(SAMPLES["code_only"], run_id="r", created_at="t")[0]
+    assert code_only["observation_count"] == 0

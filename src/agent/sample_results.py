@@ -18,6 +18,7 @@ from src.agent.contracts import (
     InvestigateResult,
     NeighbourScore,
     NeighbourScores,
+    Observation,
     RelatedAlert,
     RelatedAlerts,
     RunStats,
@@ -221,6 +222,7 @@ def _result(
     related: RelatedAlerts,
     *,
     summary: str | None = None,
+    observations: list[Observation] | None = None,
     repair: bool = False,
     fallback: bool = False,
 ) -> InvestigateResult:
@@ -300,6 +302,7 @@ def _result(
             result["fallback"] = True
         else:
             result["summary"] = summary
+            result["observations"] = observations or []
             add("llm", "submit_brief", submitted, {"valid": True, "errors": []})
     result["stats"] = stats
     result["trace"] = trace
@@ -363,8 +366,15 @@ def _fan_out_case() -> InvestigateResult:
     return _result(
         members,
         _neighbours(_neighbour("txn_samplefanup", 40), _neighbour("txn_samplefanout1", None)),
-        _related(alert, ("txn_samplefanmember", 8, SENDER)),
+        _related(alert, ("txn_samplerelated", 60, SENDER)),
         summary="One account paid out to many others, and a second top alert shares an account.",
+        observations=[
+            Observation(
+                text="The payments out of the sender follow one another closely, which may point to "
+                "a single batch rather than separate decisions.",
+                evidence_ids=["txn_samplefanout1", "txn_samplefanout2"],
+            )
+        ],
     )
 
 
@@ -374,7 +384,7 @@ def _money_returns() -> InvestigateResult:
     graph = _graph(
         alert,
         _up(alert, "txn_samplereturnup", 100, account=source, amount=100000.0),
-        _down(alert, "txn_samplereturnback", 200, account=source, amount=95000.0),
+        _down(alert, "txn_samplereturnback", 200, account=source, amount=230000.0),
     )
     history = _history(("2022-09-13", "in", 1, 5000.0))
     return _result(
@@ -389,6 +399,13 @@ def _money_returns() -> InvestigateResult:
         _neighbours(),
         _related(alert),
         summary="Money went out and came back to an account that had paid in.",
+        observations=[
+            Observation(
+                text="The account that paid in also received the onward payment, so the money appears "
+                "to move in a circle.",
+                evidence_ids=["txn_samplereturnup", "txn_samplereturnback"],
+            )
+        ],
     )
 
 
@@ -438,6 +455,7 @@ def _not_found() -> InvestigateResult:
         findings=[],
         gaps=[],
         next_checks=[],
+        observations=[],
         money_flow=[],
         members=[],
         fallback=False,

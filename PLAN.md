@@ -33,7 +33,7 @@ Keep this file short: current facts and decisions only. Section, finding and dec
 1. **Read-only tools.** The agent writes only to its decisions and cases tables and its trace prefix. It doesn't touch ETL, Silver, Gold or v1.
 2. **No labels.** Label-free tables, a column allowlist and a test that fails on a label. `data_split` and the patterns file are banned too. Only the evaluation module reads labels, and the agent never imports it.
 3. **Never remove an alert from the BQ1 queue.** BQ1 decides the order; the agent adds evidence.
-4. **All numbers and IDs come from tools.** The LLM picks tools and finding codes, and writes text with no numbers. Code checks every cited ID and writes the displayed sentences.
+4. **All numbers and IDs come from tools.** The LLM picks tools and finding codes, and writes text with no numbers. Code checks every cited ID and writes the displayed sentences. The one exception is observations (D34): up to three short remarks the LLM writes itself, with no numbers, shown separately as its reading and not checked by the finding rules.
 5. **Currency-safe.** Never sum across currencies.
 6. **Bounded.** At most 8 tool steps per run (`AGENT_MAX_STEPS`; was 5, confirm after the dry run), plus token, timeout and global spend caps.
 7. **Reasons are model explanations, not proof.** They stay in the data, but no agent query selects them and Streamlit doesn't show them (D32).
@@ -58,6 +58,7 @@ REAL-TIME  Kinesis → Lambda is459-rt-scorer (same model, 26 features)
 - **Gaps:** no graph, a truncated or short observed window, or short account history.
 - **Next checks:** what the analyst should look at next, from a fixed list.
 - **Summary:** one short sentence from the LLM, with no numbers.
+- **Observations (D34):** up to three short remarks of the LLM's own, each citing tool-returned IDs, shown as the agent's reading. Code checks IDs and wording only.
 
 The brief gives no verdict: the analyst decides. The current code still produces triage verdicts, as described in D27-D30.
 
@@ -82,7 +83,7 @@ All are in `src/agent/tools.py`, and every result has an `ids` list.
 
 | # | Tool | Change | What it gives |
 |---|---|---|---|
-| 1 | `get_case_graph` | extended | As now, plus: `hours_observed_after_alert` (alert to the end of visible data, capped at the window, so "no onward payment after N hours" is evidence, F34); `returned_to_source` (downstream payments to an account that is upstream or is the alert's sender, with both payment IDs); `flow` per currency (onward share of upstream money, fastest and median onward gap) |
+| 1 | `get_case_graph` | extended | As now, plus: `hours_observed_after_alert` (alert to the end of visible data, capped at the window, so "no onward payment after N hours" is evidence, F34); `returned_to_source` (downstream payments to an account that is upstream or is the alert's sender, with both payment IDs); `flow` per currency (onward payments as a share of the alert amount in the alert's currency, fastest and median onward gap) |
 | 2 | `get_account_activity(txn_id, side, window_h)` | new | `side` is `sender` or `receiver`. That account's other payments, in and out, within ±window of the alert, excluding the alert: counts, distinct counterparties, totals per currency, up to 50 payments per direction (`edges_capped`). Also daily counts and totals for earlier days back to 11 Sep, with `history_days`. Reads `agent_edges_v2`; no new table |
 | 3 | `get_related_alerts` | extended | Also accepts the graph's counterparty accounts, not only the alert's sender and receiver |
 | 4 | `get_alert` | changed | No reasons (D32) |
@@ -107,9 +108,9 @@ Bedrock Converse with native tool calling, temperature 0. Log steps, tokens, lat
 
 **6.2 Prompt (built):** an investigation assistant with read-only tools and no labels. Gather the flow around the alert and its accounts, report the patterns the results show, and pick next checks from the list. Cite IDs, give no verdict, and write no numbers.
 
-**6.3 Output and validation (built).** `Decision` in `src/agent/contracts.py` was replaced by `Brief`. `findings.py` holds one set of rules used three ways: S1 reports what fires, the validator accepts an LLM finding only if the same rule fires on this run's tool results (and the finding cites its core payments and nothing outside the rule's IDs), and the displayed sentence comes from it. Thresholds are placeholders (see `config.py`) and also include a minimum onward share for `PASS_THROUGH` (not in the original plan) so that a trivial onward payment does not count.
+**6.3 Output and validation (built).** `Decision` in `src/agent/contracts.py` was replaced by `Brief`. `findings.py` holds one set of rules used three ways: S1 reports what fires, the validator accepts an LLM finding only if the same rule fires on this run's tool results (and the finding cites its core payments and nothing outside the rule's IDs), and the displayed sentence comes from it. Thresholds are placeholders (see `config.py`) and also include a minimum onward share for `PASS_THROUGH` (not in the original plan) so that a trivial onward payment does not count. The share is onward payments ÷ the alert amount, in the alert's currency, because the alert is the payment that links sender and receiver (an earlier version divided by the sender's inflows, which was wrong). One-hop data cannot show that the receiver's onward payments were funded by the alert, so the finding is consistent with pass-through, not proof of it. Case members are never counted as `REPEAT_ACCOUNT_ALERTS`.
 
-*What the LLM submits:* `findings` (list of code + `evidence_ids`), `next_checks` (list of codes), `summary`.
+*What the LLM submits:* `findings` (list of code + `evidence_ids`), `next_checks` (list of codes), `summary`, and optionally `observations` (list of `text` + `evidence_ids`; at most `AGENT_MAX_OBSERVATIONS`, each at most `AGENT_OBSERVATION_MAX_CHARS` characters, with no digits, no spelled-out numbers and no accusation words such as laundering, fraud, illicit or criminal). Every cited ID must come from a tool result. Nothing checks that an observation is right.
 
 *What code adds:* `case_id` (D25); `gaps`, set from tool flags; the `money_flow` for every member; the displayed sentence for every finding, gap and next check; `members`, `stats` and `trace`. Money flow per member is counts and totals per currency, hours observed, and fastest onward gap.
 
@@ -191,21 +192,24 @@ Owned by Person 2, not started. Contract: `docs/agent_output_format.md` (matches
 | 7 | Full evaluation | Claire | To do |
 | 8 | New-day path, queue consumer | Claire | To do; required for the recorded run |
 
-## 13. Evaluation (Claire, proposed for D31)
+## 13. Evaluation (Claire, for D31)
 
 - **Days:** 14-16 Sep only, test rows only, top 100 alerts per day, reported per day. Every day is seen as of its own end (D28). Anything reading Gold must filter to these dates.
 - **Labels only after the freeze.** Tune without labels, freeze in a commit, then evaluate. Report any later change separately, as tuned after the results.
+- **What S2 can and cannot add (read first).** The validator accepts only findings that the same fixed rules find on the tool results, and S1 runs every tool for every member. So S2's findings are almost always a subset of S1's. S2 can go beyond S1 only by choosing a different window, by adding counterparty accounts to `get_related_alerts`, by scoring neighbours S1 does not look up (activity payments), and through its observations (D34). For findings, S2 against S1 therefore measures how much the LLM leaves out. What the LLM can add is the choice of which findings and evidence to show, the summary, and the next checks. Report it that way.
 - **Are the findings accurate?** Every finding must cite tool results. Report the rejected-citation, repair and fallback rates.
-- **Do the clues carry information?** For each finding code, compare the laundering rate of alerts with it and without it. Report counts with rates: 3 days is about 300 alerts.
+- **Do the clues carry information?** For each finding code, compare the laundering rate of alerts with it and without it. Positives are scarce: precision@1% is about 3.1%, and the top-100 precision is unknown until labels are read (probably higher, but do not assume it), so 300 alerts may hold only about 10 laundering alerts and per-code rates would mean little. Answer this with S1 (code only, no LLM) on a deeper list: the top 500 per day (about 100 GB scanned a day, about US$0.5), or up to 5,000 (about US$5 a day and many hours; `brief_day` is serial today, so it needs a concurrent runner). Keep S2 on the top 100. Report counts with rates and intervals. `NEIGHBOURS_HIGH_RISK` and `REPEAT_ACCOUNT_ALERTS` come from BQ1 scores (F34), so compare with and without them within BQ1 rank bands, or they will look informative just because BQ1 is. The payment-based codes (`PASS_THROUGH`, `FAN_OUT`, `FAN_IN`, `MONEY_RETURNS`, `ACTIVITY_SPIKE`) do not depend on BQ1.
 - **Does it name the right pattern?** For alerts in a laundering attempt from the patterns file, compare the agent's pattern findings with the attempt's type. For reference, the real-time explainer's typology macro-F1 is 0.345 (F21).
-- **What does the LLM add?** Compare S2 with S1 on the measures above. If the LLM adds nothing over code, report that.
+- **Are the observations useful?** They are the one place S2 says something the finding rules cannot, so judge them by hand: read a sample of about 50 briefs and mark each observation as accurate and useful, accurate but obvious, or wrong or unsupported. Report the rates, the rate of briefs that have any, and the repair rate they cause. No label can score them, so do this before looking at what labels say.
+- **What does the LLM add?** Compare S2 with S1 on the measures above, keeping in mind the first bullet: list the findings S2 drops that S1 keeps, and judge the summary and next checks on example briefs. If the LLM adds nothing over code, report that.
 - **Also:** cost and latency, and repeatability: run a 50-alert subset 3 times.
 - **Not measurable here:** time saved for analysts. Show example briefs instead.
 
 ## 15. Risks and open items
 
 - **Timeline:** the change touches the output format, the prompt, the validator, S1 and the evaluation. If time is short, fall back to the frozen triage version (`91e344e`).
-- **Code may do most of the work:** many patterns can be found by fixed rules. If S2 adds little over S1, the LLM's value is the summary and next checks, so say so.
+- **Code does most of the work:** see the first bullet of section 13. The LLM's value is the choice of findings, the summary and the next checks.
+- **Gaps and findings that fire everywhere (decide before the freeze):** with the day-end cutoff, `TRUNCATED_WINDOW` is true for every batch alert at the 48 h default (alert time plus 48 h is always past the end of its day), so it says nothing and `RECHECK_AFTER_MORE_DATA` is always allowed and always added by S1. `SHORT_OBSERVATION` is the useful version. Proposed: do not emit `TRUNCATED_WINDOW` when the day-end cutoff is the only cause. `ACTIVITY_SPIKE` compares the window with whole history days that overlap it (12-13 Sep for a 14 Sep alert), and the baseline length differs by day (3, 4 or 5 days for 14, 15 and 16 Sep). Proposed: drop it.
 - **Patterns file fit:** attempts may span days or accounts outside the top 100, so only some alerts will match an attempt. Check coverage before relying on it.
 - **Where the batch runs:** undecided. A Lambda that starts a Glue job doesn't fit "delete the message only on success", because a Lambda SQS trigger removes the message when the Lambda returns. Glue Python shell may also be too old, as `contracts.py` needs 3.10+ (check this). Suggested for the one recorded run: a simple poller on a laptop or small EC2 instance. CloudShell may time out when idle.
 - **Queue timing:** the visibility timeout is 15 minutes (F20), but the batch takes about 10 minutes plus the rebuild. The message can reappear mid-run and start a duplicate, so the consumer must keep extending the timeout while it works.
@@ -272,6 +276,7 @@ Owned by Person 2, not started. Contract: `docs/agent_output_format.md` (matches
 | D30 | The triage rules are frozen in commit `91e344e`, before anyone looked at labels. This is the fallback if D31 is not agreed. Any version is frozen in a commit before labels are read. |
 | D31 | *Owner decided 7 Nov; implemented the same day.* The agent becomes an investigation assistant: BQ1 keeps the order, and the agent writes an evidence brief per alert or case (section 3), with no verdict. Tools in 5.3, input and output in section 6. S1 becomes a code-only brief. Evaluation as in section 13. |
 | D32 | BQ1 reasons stay in the data but are not shown in Streamlit and not given to the agent. The agent never explains the BQ1 score: it reports evidence around the alert. The F35 numbers are reported as a limit of BQ1's explanations. |
+| D34 | *7 Nov.* Observations: besides the verified findings, the LLM may add up to three free-form remarks (a `text` plus the `evidence_ids` it is about). Code checks the IDs, length, no numbers and no accusation words, not whether the remark is right, so the app shows them as the agent's reading. Code-only briefs and fallbacks have none. Rows store only `observation_count`. |
 | D33 | One hop only. BQ2 is defined as one hop (6-72 h) and only that is evaluated, so the agent doesn't follow a counterparty's own payments. A second hop would be new analysis, not BQ2 output. |
 
 ## 18. Data access (built)

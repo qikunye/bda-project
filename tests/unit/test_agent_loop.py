@@ -128,7 +128,7 @@ def test_several_tool_calls_in_one_step_run_together(monkeypatch):
                 SUBMIT,
                 valid_payload(
                     findings=[
-                        {"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_b"]}
+                        {"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_ext"]}
                     ],
                     next_checks=["REVIEW_RELATED_ALERTS"],
                 ),
@@ -481,6 +481,36 @@ def test_a_brief_that_writes_its_own_gaps_or_money_flow_is_rejected(monkeypatch)
 # --- The activity tool and extra accounts
 
 
+def test_related_alerts_never_count_the_cases_own_members_as_repeats(monkeypatch):
+    calls = stub_tools(monkeypatch)
+    llm = ScriptedLLM(
+        turn(("get_related_alerts", {"txn_id": "txn_b"})),
+        turn(
+            (
+                SUBMIT,
+                valid_payload(
+                    findings=[{"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_a"]}],
+                    next_checks=[],
+                ),
+            )
+        ),
+        turn(
+            (
+                SUBMIT,
+                valid_payload(
+                    findings=[{"code": "REPEAT_ACCOUNT_ALERTS", "evidence_ids": ["txn_ext"]}],
+                    next_checks=["REVIEW_RELATED_ALERTS"],
+                ),
+            )
+        ),
+    )
+    result = run_agent(None, llm, case_of("txn_a", "txn_b"))
+    related = next(c for c in calls if c[0] == "get_related_alerts")
+    assert related[2] == ("txn_a", "txn_b")  # Every member, not only the one searched.
+    assert result["stats"]["validation"] == "repaired"  # Citing a member was refused.
+    assert [f["evidence_ids"] for f in result["findings"]] == [["txn_ext"]]
+
+
 def test_account_activity_supports_a_fan_out_finding(monkeypatch):
     stub_tools(monkeypatch, fan=6)
     llm = ScriptedLLM(
@@ -604,3 +634,53 @@ def test_loop_settings_follow_the_config():
     assert settings.s1.window_h == config.AGENT_WINDOW_H_DEFAULT
     assert loop.TEMPERATURE == 0.0
     assert LLMUsage(1, 2) + LLMUsage(3, 4) == LLMUsage(4, 6)
+
+
+# --- Observations
+
+
+def test_observations_come_back_with_the_brief_and_are_not_changed(monkeypatch):
+    remark = {
+        "text": "The onward payments appear close together.",
+        "evidence_ids": ["txn_low", "txn_high"],
+    }
+    llm = ScriptedLLM(
+        *good_run()[:2], turn((SUBMIT, valid_payload(observations=[remark])))
+    )
+    result = run(monkeypatch, llm)
+    assert result["observations"] == [remark]
+    assert [f["code"] for f in result["findings"]] == ["PASS_THROUGH", "NEIGHBOURS_HIGH_RISK"]
+    assert result["fallback"] is False
+
+
+def test_an_observation_with_numbers_or_accusations_is_repaired(monkeypatch):
+    bad = valid_payload(
+        observations=[{"text": "This is money laundering.", "evidence_ids": ["txn_low"]}]
+    )
+    good = valid_payload(
+        observations=[{"text": "The onward payments appear quick.", "evidence_ids": ["txn_low"]}]
+    )
+    llm = ScriptedLLM(*good_run()[:2], turn((SUBMIT, bad)), turn((SUBMIT, good)))
+    result = run(monkeypatch, llm)
+    assert result["stats"]["validation"] == "repaired"
+    rejection = llm.calls[3]["messages"][-1]["content"][0]["toolResult"]["content"][0]["text"]
+    assert "not accuse" in rejection
+    assert result["observations"][0]["text"] == "The onward payments appear quick."
+
+
+def test_a_fallback_brief_has_no_observations(monkeypatch):
+    remark = {"text": "Something appears odd.", "evidence_ids": ["txn_low"]}
+    bad = valid_payload(summary="It moved 5 times.", observations=[remark])
+    llm = ScriptedLLM(*good_run()[:2], turn((SUBMIT, bad)), turn((SUBMIT, bad)))
+    result = run(monkeypatch, llm)
+    assert result["fallback"] is True
+    assert result["observations"] == []  # Only the LLM writes observations.
+
+
+def test_the_prompt_and_submit_tool_offer_observations():
+    assert "observations" in prompts.SYSTEM_PROMPT
+    submit = next(t for t in prompts.TOOLS if t.name == SUBMIT)
+    schema = submit.input_schema
+    assert "observations" in schema["properties"]
+    assert "observations" not in schema["required"]
+    assert schema["properties"]["observations"]["maxItems"] == config.AGENT_MAX_OBSERVATIONS

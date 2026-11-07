@@ -259,3 +259,107 @@ def test_all_problems_are_reported_together():
         )
     )
     assert len(errors) >= 4
+
+
+# --- Observations: the LLM's own remarks, checked for IDs and wording only
+
+
+def observation(text="The payments out appear close together.", ids=("txn_low", "txn_high")):
+    return {"text": text, "evidence_ids": list(ids) if isinstance(ids, (list, tuple)) else ids}
+
+
+def test_observations_are_optional_and_default_to_none():
+    payload = valid_payload()
+    assert "observations" not in payload
+    assert check(payload)["observations"] == []
+
+
+def test_an_observation_citing_tool_ids_is_accepted_whether_or_not_a_rule_covers_it():
+    # txn_low is in no finding, and no rule describes this remark. Only IDs and wording are checked.
+    brief = check(valid_payload(observations=[observation()]))
+    assert brief["observations"] == [observation()]
+
+
+def test_an_observation_may_cite_an_account():
+    check(valid_payload(observations=[observation(ids=["3|C"])]))
+
+
+def test_repeated_ids_and_identical_observations_are_dropped():
+    brief = check(
+        valid_payload(
+            observations=[observation(ids=["txn_low", "txn_low"]), observation(ids=["txn_high"])]
+        )
+    )
+    assert brief["observations"] == [observation(ids=["txn_low"])]
+
+
+def test_observations_must_be_a_list_of_text_and_ids():
+    rejected(valid_payload(observations="They look odd."), mentioning="list of")
+    rejected(valid_payload(observations=["They look odd."]), mentioning="exactly the fields")
+    rejected(
+        valid_payload(observations=[{"text": "x", "evidence_ids": ["txn_low"], "kind": "a"}]),
+        mentioning="exactly the fields",
+    )
+    rejected(valid_payload(observations=[observation(text="  ")]), mentioning="some text")
+    rejected(valid_payload(observations=[observation(ids=[])]), mentioning="at least one evidence ID")
+    rejected(valid_payload(observations=[observation(ids="txn_low")]), mentioning="list of ID strings")
+    rejected(valid_payload(observations=[observation(ids=[1])]), mentioning="list of ID strings")
+
+
+def test_there_is_a_limit_on_observations_and_on_ids_per_observation():
+    many = [observation(text=f"Remark {chr(97 + n)}.", ids=["txn_low"]) for n in range(config.AGENT_MAX_OBSERVATIONS + 1)]
+    rejected(valid_payload(observations=many), mentioning="At most")
+    ids = [f"txn_{n}" for n in range(config.AGENT_MAX_EVIDENCE_IDS + 1)]
+    rejected(valid_payload(observations=[observation(ids=ids)]), mentioning="The limit is")
+
+
+def test_an_observation_cannot_cite_ids_no_tool_returned():
+    rejected(
+        valid_payload(observations=[observation(ids=["txn_invented"])]),
+        mentioning="observation 1 cites IDs no tool returned",
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "They moved 3 times.",
+        "About fifty payments appear.",
+        "Hundreds of accounts are involved.",
+    ],
+)
+def test_observations_carry_no_numbers(text):
+    rejected(valid_payload(observations=[observation(text=text)]), mentioning="observation 1")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "This looks like money laundering.",
+        "The pattern suggests fraud.",
+        "These payments appear illicit.",
+        "A criminal network may be involved.",
+        "The owner is guilty of layering.",
+    ],
+)
+def test_observations_and_summaries_make_no_accusations(text):
+    rejected(valid_payload(observations=[observation(text=text)]), mentioning="not accuse")
+    rejected(valid_payload(summary=text), mentioning="not accuse")
+
+
+def test_an_observation_is_limited_in_length():
+    check(valid_payload(observations=[observation(text="x" * config.AGENT_OBSERVATION_MAX_CHARS)]))
+    rejected(
+        valid_payload(observations=[observation(text="x" * (config.AGENT_OBSERVATION_MAX_CHARS + 1))]),
+        mentioning="The limit is",
+    )
+
+
+def test_each_observation_is_numbered_in_its_errors():
+    errors = errors_of(
+        valid_payload(
+            observations=[observation(), observation(text="It moved 3 times.", ids=["txn_low"])]
+        )
+    )
+    assert any(e.startswith("observation 2") for e in errors)
+    assert not any(e.startswith("observation 1") for e in errors)

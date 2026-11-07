@@ -66,6 +66,8 @@ def summarise_runs(results: list[dict], failures: list[dict], spent_usd: float) 
             Counter(f["code"] for r in runs for f in r["findings"]).most_common()
         ),
         "cases_with_findings": sum(bool(r["findings"]) for r in runs),
+        "cases_with_observations": sum(bool(r["observations"]) for r in runs),
+        "observations": sum(len(r["observations"]) for r in runs),
         "gap_counts": dict(
             Counter(g["code"] for r in runs for g in r["gaps"]).most_common()
         ),
@@ -95,6 +97,9 @@ def print_summary(summary: dict, athena_gb: float, seconds: float) -> None:
         for reason, count in summary["rejected_brief_reasons"].items():
             print(f"  {count} x {reason}")
     print(f"Cases with at least one finding: {summary['cases_with_findings']}")
+    print(
+        f"Observations: {summary['observations']} in {summary['cases_with_observations']} cases"
+    )
     print("Findings:", summary["finding_counts"])
     print("Gaps:", summary["gap_counts"])
     for key in (

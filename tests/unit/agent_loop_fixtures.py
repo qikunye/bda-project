@@ -362,7 +362,10 @@ def stub_tools(
     ):
         as_of_seen.append(as_of)
         calls.append(("get_related_alerts", tuple(accounts), tuple(exclude_txn_ids)))
-        return related_result("txn_b")
+        # txn_b is another case member in the two-alert cases, so exclusion must hide it.
+        return related_result(
+            *[t for t in ("txn_ext", "txn_b") if t not in exclude_txn_ids]
+        )
 
     monkeypatch.setattr(tools, "get_alert", get_alert)
     monkeypatch.setattr(tools, "get_case_graph", get_case_graph)

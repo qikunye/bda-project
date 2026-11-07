@@ -59,6 +59,7 @@ def investigate(
             findings=[],
             gaps=[],
             next_checks=[],
+            observations=[],
             money_flow=[],
             members=[],
             fallback=False,

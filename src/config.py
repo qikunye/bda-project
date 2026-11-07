@@ -44,7 +44,7 @@ AGENT_S1_MAX_EVIDENCE = 10  # IDs the code-only brief cites per finding.
 # of the 14-16 Sep top alerts and of ordinary accounts, then commit them before any label is read.
 # Do not tune them on results. Change one only with a note saying why and when.
 AGENT_PASS_THROUGH_MAX_GAP_MIN = 360  # PASS_THROUGH: first onward payment within this many minutes.
-AGENT_PASS_THROUGH_MIN_ONWARD_SHARE = 0.5  # ...and at least this share of the money paid in went on.
+AGENT_PASS_THROUGH_MIN_ONWARD_SHARE = 0.5  # ...and onward payments of at least this share of the alert amount.
 AGENT_FAN_MIN_COUNTERPARTIES = 5  # FAN_OUT / FAN_IN: distinct counterparties in the window.
 AGENT_NEIGHBOURS_HIGH_MIN = 1  # NEIGHBOURS_HIGH_RISK: neighbours in the day's top K.
 AGENT_SPIKE_FACTOR = 3.0  # ACTIVITY_SPIKE: window payments per day over the earlier daily mean.
@@ -70,6 +70,10 @@ AGENT_SPEND_CAP_USD = 10.0  # Estimated spend per process, shared by all runs in
 # over-estimates cheaper ones. Check the Bedrock pricing page before relying on it.
 AGENT_PRICE_USD_PER_M_TOKENS = (3.0, 15.0)
 AGENT_SUMMARY_MAX_CHARS = 200
+# Free-form remarks the LLM may add beyond the verified findings. Code checks their IDs and wording,
+# not whether the interpretation is right, so the app shows them as the agent's reading.
+AGENT_MAX_OBSERVATIONS = 3
+AGENT_OBSERVATION_MAX_CHARS = 240
 
 # Batch runner and storage.
 AGENT_DECISIONS_TABLE = "is459_agent_decisions"  # Key: transaction_id.
