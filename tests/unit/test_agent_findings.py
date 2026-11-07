@@ -11,6 +11,7 @@ from tests.unit.agent_loop_fixtures import (
     alert_result,
     graph_result,
     make_evidence,
+    neighbour_scores_result,
     related_result,
 )
 
@@ -222,10 +223,29 @@ def test_no_money_returns_when_it_goes_elsewhere():
 
 
 def test_neighbours_in_the_top_k_are_cited_best_rank_first():
-    evidence = make_evidence(ranks={"txn_low": 400, "txn_high": 12, "txn_far": 900})
+    evidence = make_evidence(ranks={"txn_low": 400, "txn_high": 12, "txn_up": 900})
     found = instance(evidence, "NEIGHBOURS_HIGH_RISK")
     assert found.ids == ("txn_high", "txn_low")
     assert found.sentence.endswith("2 of 3.")
+
+
+def test_a_scored_related_alert_is_not_a_neighbour():
+    # Related alerts are top-K by definition, so scoring them would always fire this finding.
+    evidence = make_evidence(ranks={"txn_low": 900}, related=related_result("txn_x"))
+    evidence.record("get_neighbour_scores", neighbour_scores_result({"txn_x": 3}))
+    assert "NEIGHBOURS_HIGH_RISK" not in codes(evidence)
+    assert "REPEAT_ACCOUNT_ALERTS" in codes(evidence)
+
+
+def test_a_scored_payment_from_account_activity_is_a_neighbour():
+    evidence = make_evidence(ranks={"txn_low": 900}, fan=1)
+    evidence.record("get_neighbour_scores", neighbour_scores_result({"txn_so1": 40}))
+    assert instance(evidence, "NEIGHBOURS_HIGH_RISK").ids == ("txn_so1",)
+
+
+def test_a_scored_payment_no_graph_or_activity_listed_is_not_a_neighbour():
+    evidence = make_evidence(ranks={"txn_low": 900, "txn_far": 7})
+    assert "NEIGHBOURS_HIGH_RISK" not in codes(evidence)
 
 
 def test_neighbours_outside_the_top_k_or_unscored_are_not_found():
@@ -258,66 +278,13 @@ def test_no_related_alerts_or_no_call_is_not_a_finding():
     assert "REPEAT_ACCOUNT_ALERTS" not in codes(make_evidence())
 
 
-# --- ACTIVITY_SPIKE
+# --- No activity-spike finding
 
 
-def spike_evidence(n_payments, history):
-    alert = alert_result("txn_a")
-    rows = [
-        {
-            "direction": "out",
-            "transaction_id": f"txn_sp{n}",
-            "counterparty_key": f"8|O{n % 2}",
-            "transaction_timestamp": "2022-09-14 10:30:00.000",
-            "offset_minutes": str(n),
-            "amount_paid": "10.000000",
-            "payment_currency": "US Dollar",
-            "payment_format": "ACH",
-        }
-        for n in range(1, n_payments + 1)
-    ]
-    frame = pd.DataFrame(
-        [
-            {
-                "txn_date": day,
-                "direction": "out",
-                "payment_currency": "US Dollar",
-                "n_payments": str(n),
-                "total_amount": "10.00",
-            }
-            for day, n in history
-        ],
-        columns=["txn_date", "direction", "payment_currency", "n_payments", "total_amount"],
-    )
-    evidence = make_evidence(ranks={}, activities=False)
-    evidence.record(
-        "get_account_activity",
-        tools.account_activity_from_frames(
-            alert, "sender", pd.DataFrame(rows, columns=ACTIVITY_COLUMNS), frame, 48
-        ),
-    )
-    return evidence
-
-
-def test_activity_spike_compares_the_daily_rate_with_earlier_days():
-    # 8 payments over 4 observed days is 2 a day, against 1 a day earlier (3 over 3 days).
-    history = [("2022-09-12", 2), ("2022-09-13", 1)]
-    assert "ACTIVITY_SPIKE" not in codes(spike_evidence(8, history))
-    quiet_history = [("2022-09-13", 1)]  # 1 over 3 days: 0.33 a day, so 2 a day is 6 times.
-    found = instance(spike_evidence(8, quiet_history), "ACTIVITY_SPIKE")
-    assert "6.0 times its earlier daily mean of 0.3" in found.sentence
-
-
-def test_activity_spike_with_no_earlier_payments_says_so():
-    found = instance(spike_evidence(8, []), "ACTIVITY_SPIKE")
-    assert "with no payments on the earlier days" in found.sentence
-
-
-def test_activity_spike_needs_enough_payments_and_history(monkeypatch):
-    few = config.AGENT_SPIKE_MIN_PAYMENTS - 1
-    assert "ACTIVITY_SPIKE" not in codes(spike_evidence(few, []))
-    monkeypatch.setattr(config, "AGENT_MIN_HISTORY_DAYS", 4)  # A 14 Sep alert has 3.
-    assert "ACTIVITY_SPIKE" not in codes(spike_evidence(8, []))
+def test_activity_spike_is_not_a_finding():
+    # Dropped before the freeze: the history (from 11 Sep) overlaps the window and differs in length
+    # by day, so a jump in activity could not be judged fairly.
+    assert "ACTIVITY_SPIKE" not in findings.FINDING_CODES
 
 
 # --- Checking a finding

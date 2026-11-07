@@ -301,10 +301,17 @@ def test_window_truncated_follows_data_horizon(ts, window_h, truncated):
     assert get_graph([], ts=ts, window_h=window_h)["window_truncated"] is truncated
 
 
-def test_a_cutoff_truncates_the_window_and_is_reported():
+def test_a_cutoff_is_reported_but_does_not_truncate_the_window():
+    # Only the end of the dataset truncates. A run's cutoff shows in hours_observed_after_alert.
     graph = get_graph([], as_of="2022-09-14 23:59:59")
-    assert graph["window_truncated"] is True
+    assert graph["window_truncated"] is False
     assert graph["horizon_end"] == "2022-09-14 23:59:59"
+    assert graph["hours_observed_after_alert"] == 14.0
+
+
+def test_a_cutoff_does_not_hide_that_the_window_passes_the_end_of_the_data():
+    graph = get_graph([], ts="2022-09-16 20:00:00.000", as_of="2022-09-16 23:59:59")
+    assert graph["window_truncated"] is True
 
 
 def test_a_cutoff_past_the_window_does_not_truncate():
@@ -432,6 +439,29 @@ def test_onward_share_does_not_depend_on_what_the_sender_took_in():
     assert shares == [0.5, 0.5, 0.5]
 
 
+def test_onward_share_counts_only_payments_within_the_pass_through_gap():
+    # The alert is 1,500.25 US Dollar. A small quick payment, then a large one much later.
+    limit = config.AGENT_PASS_THROUGH_MAX_GAP_MIN
+    graph = get_graph(
+        [
+            edge("DOWNSTREAM", "txn_d1", RECEIVER, "40|E", 15, amount="150.050000"),
+            edge("DOWNSTREAM", "txn_d2", RECEIVER, "41|F", limit, amount="150.000000"),
+            edge("DOWNSTREAM", "txn_d3", RECEIVER, "42|G", limit + 1, amount="5000.000000"),
+        ]
+    )
+    flow = graph["flow"]["US Dollar"]
+    assert flow["onward_share"] == 0.2  # 300.05 of 1,500.25; the later 5,000 does not count.
+    assert flow["downstream_total"] == 5300.05  # Totals still cover the whole window.
+    assert flow["fastest_onward_txn_id"] == "txn_d1"
+
+
+def test_onward_share_is_zero_when_nothing_went_on_within_the_gap():
+    late = config.AGENT_PASS_THROUGH_MAX_GAP_MIN + 60
+    graph = get_graph([edge("DOWNSTREAM", "txn_d1", RECEIVER, "40|E", late, amount="1500.250000")])
+    assert graph["flow"]["US Dollar"]["onward_share"] == 0.0
+    assert graph["flow"]["US Dollar"]["fastest_onward_gap_minutes"] == late
+
+
 def test_onward_share_is_null_when_the_alert_has_no_amount():
     alert_row = alert_frame()
     alert_row["amount_paid"] = None
@@ -549,10 +579,10 @@ def test_account_activity_excludes_the_alert_and_stays_in_the_window_in_sql():
     assert "TIMESTAMP '2022-09-14 16:00:00'" in statement
 
 
-def test_account_activity_cutoff_ends_the_sql_window_and_truncates():
+def test_account_activity_cutoff_ends_the_sql_window_without_truncating():
     result, fake = get_activity([], as_of="2022-09-14 12:00:00")
     assert "TIMESTAMP '2022-09-14 12:00:00'" in fake.calls[1]
-    assert result["window_truncated"] is True
+    assert result["window_truncated"] is False
     assert result["hours_observed_after_alert"] == pytest.approx(2.0, abs=0.1)
 
 

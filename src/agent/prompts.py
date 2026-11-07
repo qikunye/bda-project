@@ -20,7 +20,8 @@ _NEXT_CHECK_HELP = "\n".join(
 )
 _GAP_HELP = f"""\
   - NO_GRAPH_AVAILABLE: the representative's get_case_graph has no_graph true.
-  - TRUNCATED_WINDOW: a graph or activity result has window_truncated true.
+  - TRUNCATED_WINDOW: a graph or activity result has window_truncated true (the window runs past the \
+end of the dataset).
   - SHORT_OBSERVATION: hours_observed_after_alert is below {config.AGENT_MIN_HOURS_OBSERVED:g}.
   - SHORT_HISTORY: you did not call get_account_activity, or history_days is below {config.AGENT_MIN_HISTORY_DAYS}."""
 
@@ -69,9 +70,14 @@ above.
 - observations: up to {config.AGENT_MAX_OBSERVATIONS} short remarks of your own about what the results \
 show beyond the findings, such as how payments or accounts relate to each other or something odd in the \
 timing. Cite the IDs each one is about. Hedge ("appears", "may"). The analyst sees them as your reading, \
-not as checked facts, so do not repeat a finding. Each is at most {config.AGENT_OBSERVATION_MAX_CHARS} \
-characters, with no digits, no numbers spelled out as words, and no accusation or verdict (words such as \
-laundering, fraud, illicit and criminal are rejected). Leave the list empty if you have nothing to add.
+not as checked facts, so do not repeat a finding, and do not describe a pattern that is not among your \
+findings (passing through, fanning out or in, money going back, high-ranked payments nearby, or other \
+alerts): submit it as a finding if the results support it. Do not claim the account was busier than \
+before: the earlier history is too short to show that. Each is at most \
+{config.AGENT_OBSERVATION_MAX_CHARS} characters, with no digits, no numbers spelled out as words, and no \
+accusation or verdict (words such as laundering, fraud, illicit, criminal, suspicious and mule are not \
+allowed). An observation that breaks these rules is dropped without telling you, so the brief still \
+counts. Leave the list empty if you have nothing to add.
 - Do not write gaps, money flow or case_id in the brief. Code adds them.
 """
 
@@ -102,12 +108,15 @@ TOOLS: tuple[ToolDefinition, ...] = (
         description=(
             "Payments into the sender before the alert (upstream) and out of the receiver after it "
             "(downstream) within the window, for a case member. Gives counts, totals per currency, "
-            "and flow per currency: onward payments as a share of the alert amount (alert's "
-            "currency only), and the fastest and median gap in minutes from the alert to an onward payment. returned_to_source lists "
+            "and flow per currency: onward payments within "
+            f"{config.AGENT_PASS_THROUGH_MAX_GAP_MIN} minutes of the alert as a share of the alert "
+            "amount (alert's currency only), and the fastest and median gap in minutes from the "
+            "alert to an onward payment. returned_to_source lists "
             "onward payments that went back to the alert's sender or to an account that had paid "
             "it. hours_observed_after_alert says how much time after the alert the data covers: no "
             "onward payment only means something if it is large. Flags: no_graph (no payments "
-            "found), window_truncated (the window runs past the data available to this review), "
+            "found), window_truncated (the window runs past the end of the dataset; this review's "
+            "own cutoff shows in hours_observed_after_alert instead), "
             "edges_capped (only the first "
             f"{config.AGENT_MAX_EDGES_PER_DIRECTION} payments per direction are listed)."
         ),

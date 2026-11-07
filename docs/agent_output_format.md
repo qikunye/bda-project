@@ -21,9 +21,9 @@ All sample IDs, numbers and sentences are invented, and `stats["model"]` is `"sa
 | Sample | What your screen should handle |
 |---|---|
 | `pass_through` | One finding, with money in and out. No gaps. A single alert, so `case_id` is `None` |
-| `fan_out_case` | A case of two alerts, with several findings (fan-out, fan-in, neighbours, repeat alerts, activity spike) and one observation |
+| `fan_out_case` | A case of two alerts, with several findings (fan-out, fan-in, neighbours, repeat alerts) and one observation |
 | `money_returns` | Money that went back to an account it came from, with one observation |
-| `quiet_truncated` | No findings, and two gaps: the window runs past the data, and too little time is observed. This is normal for batch results |
+| `quiet_truncated` | No findings, and two gaps: the window runs past the end of the data, and too little time is observed. Typical of late alerts on 16 Sep |
 | `no_graph` | A self-transfer: no payments, `amount`, `currency` and `payment_format` are `None`, and the only gap is `NO_GRAPH_AVAILABLE` |
 | `code_only` | A brief built by code alone (S1), with the template summary |
 | `repaired` | The LLM's brief passed only after one retry |
@@ -39,7 +39,7 @@ All sample IDs, numbers and sentences are invented, and `stats["model"]` is `"sa
 | `findings` | Patterns, each with the payments behind it (`evidence_ids`) | The LLM picks the code and the evidence; code checks it and writes the sentence |
 | `gaps` | What the agent could not see or check | Code only |
 | `next_checks` | What the analyst should look at next | The LLM picks from a fixed list; code checks it and writes the sentence |
-| `observations` | Up to three short remarks beyond the findings, each with the IDs it is about | The LLM writes them. Code checks the IDs and wording only, not that they are right |
+| `observations` | Up to three short remarks beyond the findings, each with the IDs it is about | The LLM writes them. Code checks the IDs and wording only, not that they are right. One that names a pattern the findings do not have, or breaks the wording rules, is dropped |
 
 There is **no verdict and no confidence**. Do not show a "raise" or "risk" badge from the agent. The BQ1 score and rank still come from `alert`.
 
@@ -67,7 +67,7 @@ It takes about 20 seconds or more, so show a spinner. Unlike the batch it has no
 | `money_flow` | list of `MemberMoneyFlow`, best rank first | A small table or card per alert |
 | `members` | list of `{alert, graph}`, best rank first | Every alert in the case with its payments, so the analyst needn't look them up |
 | `fallback` | `bool` | `True` means code alone built the brief (no LLM). Label it clearly |
-| `stats` | model, steps, tokens, latency, validation outcome | A "how this was made" panel |
+| `stats` | model, steps, tokens, latency, validation outcome, `observations_dropped` | A "how this was made" panel |
 | `trace` | list of steps | The steps in order. `actor` says whether code or the LLM chose each one |
 
 `money_flow[i]`:
@@ -77,7 +77,7 @@ It takes about 20 seconds or more, so show a spinner. Unlike the batch it has no
 | `txn_id` | The alert it describes |
 | `no_graph` | `True` if there are no payments to look at (such as a self-transfer) |
 | `n_upstream`, `n_downstream` | Payments into the sender before the alert, and out of the receiver after it |
-| `per_currency[currency]` | `upstream_total`, `downstream_total`, `onward_share` (onward payments as a share of the alert amount, only in the alert's own currency, so `None` in other currencies; can be above 1), `fastest_onward_gap_minutes` and `median_onward_gap_minutes` (minutes from the alert to an onward payment, `None` if nothing went on), and `fastest_onward_txn_id` |
+| `per_currency[currency]` | `upstream_total`, `downstream_total`, `onward_share` (onward payments within the pass-through gap threshold, 360 minutes for now, as a share of the alert amount, only in the alert's own currency, so `None` in other currencies; can be above 1), `fastest_onward_gap_minutes` and `median_onward_gap_minutes` (minutes from the alert to an onward payment, `None` if nothing went on), and `fastest_onward_txn_id` |
 | `hours_observed_after_alert` | How long after the alert the data reaches, capped at the window. "Nothing went on" only means something if this is large |
 
 ## Finding codes
@@ -92,7 +92,6 @@ Use these as labels or icons. Always show the `sentence`, not just the code.
 | `MONEY_RETURNS` | Money went back to an account it came from, or to the alert's sender |
 | `NEIGHBOURS_HIGH_RISK` | Payments around the alert were themselves ranked high by BQ1 that day |
 | `REPEAT_ACCOUNT_ALERTS` | Other top alerts involve the same accounts |
-| `ACTIVITY_SPIKE` | The account was much busier than on earlier days (may be dropped if time is short) |
 
 ## Gap codes
 
@@ -101,7 +100,7 @@ Set by code from what the tools could not see. They are not failures: they say h
 | Code | Meaning |
 |---|---|
 | `NO_GRAPH_AVAILABLE` | No payments found around the alert |
-| `TRUNCATED_WINDOW` | The window runs past the data available. Normal for batch results, which see data only up to the end of the alert's day |
+| `TRUNCATED_WINDOW` | The window runs past the end of the dataset (16 Sep), so later payments can never be seen. A batch run's own end-of-day cutoff does not set it; `SHORT_OBSERVATION` covers that |
 | `SHORT_OBSERVATION` | Too little time after the alert was observed to say money did not move on |
 | `SHORT_HISTORY` | The accounts' earlier activity was not checked, or too few earlier days are available to compare. Alerts on 14-16 Sep have at least three earlier days, so in practice this means the agent did not check |
 

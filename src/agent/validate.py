@@ -1,6 +1,6 @@
 """Checks the LLM's brief against what the tools returned in the same run.
 It rejects unsupported findings, made-up IDs, disallowed next checks, and numbers or accusations
-in the LLM's own text."""
+in the summary. Observations are optional extras, so a bad one is dropped instead of rejecting the brief."""
 
 import re
 from collections.abc import Mapping
@@ -24,9 +24,43 @@ _NUMBER_WORD = re.compile(
 )
 
 
-# The agent describes payments and never accuses anyone, so these words are not allowed in its text.
+# The agent describes payments and never accuses anyone or gives a verdict, so these words, including
+# AML terms of art for laundering stages and roles, are not allowed in its text.
 _ACCUSATION = re.compile(
-    r"\b(launder\w*|illicit|criminals?|crimes?|fraud\w*|guilty)\b", re.IGNORECASE
+    r"\b(launder\w*|illicit|criminals?|crimes?|fraud\w*|guilty|suspicio\w*|suspect\w*|mules?|"
+    r"layering|structuring|smurf\w*)\b",
+    re.IGNORECASE,
+)
+
+# Wording that describes a finding's pattern. An observation may use it only when the brief has that
+# finding, so a pattern the rules did not confirm cannot come back as an unchecked remark.
+_FINDING_WORDING: dict[str, re.Pattern[str]] = {
+    "PASS_THROUGH": re.compile(
+        r"\b(pass(es|ed|ing)?|flow(s|ed|ing)?)[\s-]*through\b|\bpassthrough\b", re.IGNORECASE
+    ),
+    "FAN_OUT": re.compile(r"\bfan(s|ned|ning)?[\s-]*out\b", re.IGNORECASE),
+    "FAN_IN": re.compile(r"\bfan(s|ned|ning)?[\s-]*in\b", re.IGNORECASE),
+    "MONEY_RETURNS": re.compile(
+        r"\b(went|goes|go|came|comes|come|flow(s|ed)?|sent|paid|cycl\w*|loop\w*) back\b|"
+        r"\breturn(s|ed|ing)? to (the |its |their )?(sender|source|origin)\b|"
+        r"\bround[\s-]?trip\w*|\bcircular\w*",
+        re.IGNORECASE,
+    ),
+    "NEIGHBOURS_HIGH_RISK": re.compile(r"\bhigh(ly)?[\s-]*(risk|rank\w*|scor\w*)\b", re.IGNORECASE),
+    "REPEAT_ACCOUNT_ALERTS": re.compile(
+        r"\b(other|repeat\w*|related|further|multiple|several|more|earlier|later) alerts?\b|"
+        r"\balerted (again|repeatedly)\b",
+        re.IGNORECASE,
+    ),
+}
+assert set(_FINDING_WORDING) == FINDING_CODES
+
+# Claims no rule can back. A jump in activity was dropped as a finding because the account history
+# (from 11 Sep) is too short and overlaps the window, so an observation may not claim one either.
+_UNSUPPORTED_WORDING = re.compile(
+    r"\bspik\w*|\bsurg(e|es|ed|ing)\b|\bbursts?\b|\bjump\w* in (activity|payments)\b|"
+    r"\b(busier|more active) than (usual|before|normal)\b|\bunusual(ly)? (high|busy|active)\b",
+    re.IGNORECASE,
 )
 
 
@@ -34,10 +68,50 @@ _ACCUSATION = re.compile(
 class Validated:
     brief: Brief | None
     errors: tuple[str, ...] = ()
+    # Why observations were left out of an accepted brief. They never cause a rejection.
+    dropped_observations: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
         return self.brief is not None
+
+
+def _parse_observations(payload: Mapping) -> tuple[list[Observation], list[str]]:
+    """The well-formed observations, and why the others were dropped. Never rejects the brief."""
+
+    raw_observations = payload.get("observations", [])
+    if not isinstance(raw_observations, list):
+        return [], ["observations was not a list, so none were kept."]
+    dropped: list[str] = []
+    if len(raw_observations) > config.AGENT_MAX_OBSERVATIONS:
+        dropped.append(
+            f"Only the first {config.AGENT_MAX_OBSERVATIONS} of {len(raw_observations)} "
+            "observations were kept."
+        )
+    observations: list[Observation] = []
+    seen_text: set[str] = set()
+    for number, raw in enumerate(raw_observations[: config.AGENT_MAX_OBSERVATIONS], start=1):
+        label = f"observation {number}"
+        if not isinstance(raw, Mapping) or set(raw) != {"text", "evidence_ids"}:
+            dropped.append(f"{label} did not have exactly the fields text and evidence_ids.")
+            continue
+        text, ids = raw["text"], raw["evidence_ids"]
+        if not isinstance(text, str) or not text.strip():
+            dropped.append(f"{label} had no text.")
+        elif not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            dropped.append(f"{label} evidence_ids was not a list of ID strings.")
+        elif not ids:
+            dropped.append(f"{label} cited no evidence IDs.")
+        elif len(ids) > config.AGENT_MAX_EVIDENCE_IDS:
+            dropped.append(
+                f"{label} cited {len(ids)} IDs. The limit is {config.AGENT_MAX_EVIDENCE_IDS}."
+            )
+        elif text.strip() not in seen_text:
+            seen_text.add(text.strip())
+            observations.append(
+                Observation(text=text.strip(), evidence_ids=list(dict.fromkeys(ids)))
+            )
+    return observations, dropped
 
 
 def _parse_shape(payload) -> tuple[Brief | None, list[str]]:
@@ -108,45 +182,15 @@ def _parse_shape(payload) -> tuple[Brief | None, list[str]]:
         errors.append("summary must be a short sentence.")
         summary = ""
 
-    observations: list[Observation] = []
-    raw_observations = payload.get("observations", [])
-    if not isinstance(raw_observations, list):
-        errors.append("observations must be a list of {text, evidence_ids}. Use [] for none.")
-        raw_observations = []
-    if len(raw_observations) > config.AGENT_MAX_OBSERVATIONS:
-        errors.append(
-            f"At most {config.AGENT_MAX_OBSERVATIONS} observations, got {len(raw_observations)}."
-        )
-    seen_text: set[str] = set()
-    for raw in raw_observations[: config.AGENT_MAX_OBSERVATIONS]:
-        if not isinstance(raw, Mapping) or set(raw) != {"text", "evidence_ids"}:
-            errors.append("Each observation must have exactly the fields text and evidence_ids.")
-            continue
-        text, ids = raw["text"], raw["evidence_ids"]
-        if not isinstance(text, str) or not text.strip():
-            errors.append("Each observation needs some text.")
-        elif not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
-            errors.append("An observation's evidence_ids must be a list of ID strings.")
-        elif not ids:
-            errors.append("Each observation needs at least one evidence ID.")
-        elif len(ids) > config.AGENT_MAX_EVIDENCE_IDS:
-            errors.append(
-                f"An observation cites {len(ids)} IDs. The limit is {config.AGENT_MAX_EVIDENCE_IDS}."
-            )
-        elif text.strip() not in seen_text:
-            seen_text.add(text.strip())
-            observations.append(
-                Observation(text=text.strip(), evidence_ids=list(dict.fromkeys(ids)))
-            )
-
     if errors:
         return None, errors
+    # Observations are filled in by validate_brief, which drops bad ones instead of rejecting.
     return (
         Brief(
             findings=findings,
             next_checks=next_checks,
             summary=summary.strip(),
-            observations=observations,
+            observations=[],
         ),
         [],
     )
@@ -208,19 +252,41 @@ def validate_brief(payload, evidence: RunEvidence) -> Validated:
                 "or add the finding it follows from."
             )
 
-    # 5. The LLM's own words are short, carry no numbers and make no accusation.
+    # 5. The summary is short, carries no numbers and makes no accusation.
     errors.extend(_text_errors(fields["summary"], "summary", config.AGENT_SUMMARY_MAX_CHARS))
-
-    # 6. Each observation cites IDs a tool returned. Whether it is right is not checked here.
-    for number, observation in enumerate(fields["observations"], start=1):
-        label = f"observation {number}"
-        unseen = [i for i in observation["evidence_ids"] if i not in evidence.known_ids]
-        if unseen:
-            errors.append(f"{label} cites IDs no tool returned in this run: {unseen[:5]}.")
-        errors.extend(
-            _text_errors(observation["text"], label, config.AGENT_OBSERVATION_MAX_CHARS)
-        )
 
     if errors:
         return Validated(None, tuple(errors))
-    return Validated(fields)
+
+    # 6. Observations cite IDs a tool returned, follow the same wording rules, and describe no pattern
+    # the brief's findings do not have. Whether one is right is not checked. A bad one is dropped.
+    observations, dropped = _parse_observations(payload)
+    kept: list[Observation] = []
+    for number, observation in enumerate(observations, start=1):
+        label = f"observation {number}"
+        problems = _text_errors(observation["text"], label, config.AGENT_OBSERVATION_MAX_CHARS)
+        unseen = [i for i in observation["evidence_ids"] if i not in evidence.known_ids]
+        if unseen:
+            problems.append(f"{label} cites IDs no tool returned in this run: {unseen[:5]}.")
+        claimed = [
+            code
+            for code, wording in _FINDING_WORDING.items()
+            if code not in finding_codes and wording.search(observation["text"])
+        ]
+        if claimed:
+            problems.append(
+                f"{label} describes {', '.join(claimed)}, which is not among the findings."
+            )
+        unsupported = _UNSUPPORTED_WORDING.search(observation["text"])
+        if unsupported:
+            problems.append(
+                f"{label} claims a change in activity ({unsupported.group()!r}), which the account "
+                "history is too short to show."
+            )
+        if problems:
+            dropped.extend(problems)
+        else:
+            kept.append(observation)
+
+    fields["observations"] = kept
+    return Validated(fields, dropped_observations=tuple(dropped))

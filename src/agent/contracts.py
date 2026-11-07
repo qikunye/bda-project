@@ -52,8 +52,9 @@ class CurrencyFlow(TypedDict):
 
     upstream_total: float
     downstream_total: float
-    # downstream_total / the alert amount, in the alert's own currency only (null in other currencies
-    # and when the alert has no amount). Can be above 1.
+    # Onward payments / the alert amount, in the alert's own currency only (null in other currencies
+    # and when the alert has no amount). Counts only onward payments within
+    # AGENT_PASS_THROUGH_MAX_GAP_MIN of the alert. Can be above 1.
     onward_share: float | None
     # Minutes from the alert to the first and the median onward payment; null when none went on.
     fastest_onward_gap_minutes: int | None
@@ -73,7 +74,7 @@ class CaseGraph(TypedDict):
     per_currency_totals: dict[str, dict[str, float]]
     no_graph: bool
     edges_capped: bool
-    window_truncated: bool
+    window_truncated: bool  # The window runs past the end of the dataset, not just a run's cutoff.
     horizon_end: str
     # Hours from the alert to the end of visible data, capped at the window. "No onward payment" only
     # means something if this is large enough.
@@ -121,7 +122,7 @@ class AccountActivity(TypedDict):
     per_currency_totals: dict[str, dict[str, float]]
     no_activity: bool
     edges_capped: bool
-    window_truncated: bool
+    window_truncated: bool  # The window runs past the end of the dataset, not just a run's cutoff.
     hours_observed_after_alert: float
     horizon_end: str
     # Whole days before the alert's day, from the first day the data covers. Days with no
@@ -173,7 +174,6 @@ FindingCode = Literal[
     "MONEY_RETURNS",
     "NEIGHBOURS_HIGH_RISK",
     "REPEAT_ACCOUNT_ALERTS",
-    "ACTIVITY_SPIKE",
 ]
 # Gaps are set by code from tool flags, never by the LLM.
 GapCode = Literal[
@@ -261,6 +261,9 @@ class RunStats(TypedDict):
     validation: ValidationOutcome
     repair_used: bool
     fallback: bool
+    # Observations the validator left out of an accepted brief (wording, IDs, or a pattern the
+    # findings do not have). They never cause a repair or a fallback.
+    observations_dropped: int
 
 
 class CaseMember(TypedDict):

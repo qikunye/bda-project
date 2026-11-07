@@ -168,6 +168,7 @@ def brief_from_evidence(
             validation="valid",
             repair_used=False,
             fallback=False,
+            observations_dropped=0,
         ),
         trace=trace,
     )

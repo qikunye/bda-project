@@ -215,10 +215,11 @@ def test_a_case_with_no_payments_has_a_gap_and_no_payment_findings(monkeypatch):
     assert result["money_flow"][0]["no_graph"] is True
 
 
-def test_a_truncated_window_is_a_gap_not_a_missing_finding(monkeypatch):
-    stub_tools(monkeypatch, truncated=True)
+def test_a_cutoff_soon_after_the_alert_is_a_gap_not_a_missing_finding(monkeypatch):
+    stub_tools(monkeypatch, truncated=True)  # Data visible only to 12:00, two hours after the alert.
     result = baseline.brief_case(None, case_of("txn_a"))
-    assert codes(result, "gaps") == ["TRUNCATED_WINDOW", "SHORT_OBSERVATION"]
+    # The run's own cutoff is not a truncated window: only the end of the dataset is.
+    assert codes(result, "gaps") == ["SHORT_OBSERVATION"]
     assert "PASS_THROUGH" in codes(result)
     assert "RECHECK_AFTER_MORE_DATA" in codes(result, "next_checks")
 

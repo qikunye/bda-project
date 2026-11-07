@@ -25,7 +25,7 @@ NEXT_CHECK_NEEDS: dict[str, frozenset[str]] = {
     "CHECK_SOURCE_ACCOUNTS": frozenset({"PASS_THROUGH", "FAN_IN"}),
     "CHECK_RETURN_FLOW": frozenset({"MONEY_RETURNS"}),
     "REVIEW_RELATED_ALERTS": frozenset({"REPEAT_ACCOUNT_ALERTS", "NEIGHBOURS_HIGH_RISK"}),
-    "CHECK_ACCOUNT_HISTORY": frozenset({"ACTIVITY_SPIKE", "SHORT_HISTORY"}),
+    "CHECK_ACCOUNT_HISTORY": frozenset({"SHORT_HISTORY"}),
     "RECHECK_AFTER_MORE_DATA": frozenset({"SHORT_OBSERVATION", "TRUNCATED_WINDOW"}),
 }
 assert tuple(NEXT_CHECK_NEEDS) == NEXT_CHECK_CODES
@@ -46,7 +46,6 @@ _FINDING_LABELS: dict[str, str] = {
     "MONEY_RETURNS": "money returning to its source",
     "NEIGHBOURS_HIGH_RISK": "high-ranked payments nearby",
     "REPEAT_ACCOUNT_ALERTS": "other alerts on the same accounts",
-    "ACTIVITY_SPIKE": "a jump in account activity",
 }
 
 
@@ -106,8 +105,8 @@ def compute_gaps(evidence: RunEvidence) -> list[RenderedGap]:
     truncated = next((g for g in [*graphs, *activities] if g["window_truncated"]), None)
     if truncated is not None:
         gaps["TRUNCATED_WINDOW"] = (
-            f"The {truncated['window_h']} h window runs past the data available "
-            f"({truncated['horizon_end']}), so later payments are unseen."
+            f"The {truncated['window_h']} h window runs past the end of the data "
+            f"({config.AGENT_DATA_HORIZON}), so later payments can never be seen."
         )
 
     observed = [g["hours_observed_after_alert"] for g in graphs] or [

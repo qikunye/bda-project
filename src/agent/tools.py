@@ -98,6 +98,15 @@ def _horizon(as_of: str | None) -> datetime:
     return min(horizon, _ts(as_of)) if as_of else horizon
 
 
+def _past_data_end(alert_ts: str, window_h: int) -> bool:
+    """Whether the window runs past the end of the dataset. A daily run's own end-of-day cutoff does
+    not count: it cuts every 48 h window, so it says nothing (hours_observed_after_alert covers it)."""
+
+    return _ts(alert_ts) + timedelta(hours=window_h) > datetime.fromisoformat(
+        config.AGENT_DATA_HORIZON
+    )
+
+
 def _edge(row) -> Edge:
     ts = _ts_text(row["transaction_timestamp"])
     return Edge(
@@ -169,7 +178,9 @@ def _flow(
     """Per currency: the money in and out, and how fast it went on. All edges, not only shown.
 
     ``onward_share`` compares the receiver's onward payments with the alert amount, because the alert
-    is the payment that links the two accounts. It exists only in the alert's own currency.
+    is the payment that links the two accounts. It exists only in the alert's own currency, and counts
+    only payments within AGENT_PASS_THROUGH_MAX_GAP_MIN of the alert, so a busy receiver's later
+    payments over the rest of the window do not count.
     """
 
     up_totals, down_totals = _currency_totals(upstream), _currency_totals(downstream)
@@ -177,11 +188,13 @@ def _flow(
     flow: dict[str, CurrencyFlow] = {}
     for currency in sorted(set(up_totals) | set(down_totals)):
         onward = downstream[downstream["payment_currency"] == currency]
+        quick = onward[onward["gap_minutes"] <= config.AGENT_PASS_THROUGH_MAX_GAP_MIN]
+        quick_total = _currency_totals(quick).get(currency, 0.0)
         total_in, total_out = up_totals.get(currency, 0.0), down_totals.get(currency, 0.0)
         flow[currency] = CurrencyFlow(
             upstream_total=total_in,
             downstream_total=total_out,
-            onward_share=round(total_out / alert_amount, 3)
+            onward_share=round(quick_total / alert_amount, 3)
             if alert_amount > 0 and currency == alert.get("currency")
             else None,
             fastest_onward_gap_minutes=int(onward["gap_minutes"].iloc[0])
@@ -207,7 +220,8 @@ def get_case_graph(
 ) -> CaseGraph:
     """Upstream payments into the sender and downstream payments out of the receiver (BQ2).
 
-    With ``as_of``, payments after that time are hidden and the window counts as truncated there.
+    With ``as_of``, payments after that time are hidden; hours_observed_after_alert shows how much
+    is left. window_truncated is set only when the window runs past the end of the dataset.
     """
 
     if not alert.get("found"):
@@ -273,7 +287,7 @@ def case_graph_from_frame(
         },
         no_graph=n_upstream == 0 and n_downstream == 0,
         edges_capped=n_upstream > len(upstream) or n_downstream > len(downstream),
-        window_truncated=_ts(alert["ts"]) + timedelta(hours=window_h) > horizon,
+        window_truncated=_past_data_end(alert["ts"], window_h),
         horizon_end=str(horizon),
         hours_observed_after_alert=_hours_observed(alert["ts"], window_h, horizon),
         returned_to_source=returned,
@@ -345,7 +359,8 @@ def get_account_activity(
 
     The alert itself is left out. Also gives daily counts and totals for the whole days before the
     alert's day, back to the first day the edge table covers. Those days can overlap the start of the
-    window. With ``as_of``, payments after that time are hidden and the window counts as truncated.
+    window. With ``as_of``, payments after that time are hidden; window_truncated is set only when the
+    window runs past the end of the dataset.
     """
 
     if not alert.get("found"):
@@ -439,7 +454,7 @@ def account_activity_from_frames(
         },
         no_activity=n_in == 0 and n_out == 0,
         edges_capped=n_in > len(incoming) or n_out > len(outgoing),
-        window_truncated=_ts(alert["ts"]) + timedelta(hours=window_h) > horizon,
+        window_truncated=_past_data_end(alert["ts"], window_h),
         hours_observed_after_alert=_hours_observed(alert["ts"], window_h, horizon),
         horizon_end=str(horizon),
         history_days=history_days,

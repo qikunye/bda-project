@@ -15,9 +15,9 @@ FINDING_CODES: tuple[str, ...] = get_args(FindingCode)
 REQUIREMENTS: dict[str, str] = {
     "PASS_THROUGH": (
         "get_case_graph must show money coming in and going on within "
-        f"{config.AGENT_PASS_THROUGH_MAX_GAP_MIN} minutes of the alert, with onward payments of at "
-        f"least {round(config.AGENT_PASS_THROUGH_MIN_ONWARD_SHARE * 100)}% of the alert amount, in "
-        "the alert's currency. Cite one payment in and the first payment out."
+        f"{config.AGENT_PASS_THROUGH_MAX_GAP_MIN} minutes of the alert, with onward payments in "
+        f"that time of at least {round(config.AGENT_PASS_THROUGH_MIN_ONWARD_SHARE * 100)}% of the "
+        "alert amount, in the alert's currency. Cite one payment in and the first payment out."
     ),
     "FAN_OUT": (
         "get_account_activity with side=sender must show payments to at least "
@@ -33,15 +33,10 @@ REQUIREMENTS: dict[str, str] = {
     ),
     "NEIGHBOURS_HIGH_RISK": (
         f"get_neighbour_scores must show at least {config.AGENT_NEIGHBOURS_HIGH_MIN} payment(s) "
-        f"outside the case in the day's top {config.AGENT_TOP_K}. Cite those."
+        f"from get_case_graph or get_account_activity, outside the case, in the day's top "
+        f"{config.AGENT_TOP_K}. Related alerts do not count. Cite those payments."
     ),
     "REPEAT_ACCOUNT_ALERTS": "get_related_alerts must return alerts. Cite them.",
-    "ACTIVITY_SPIKE": (
-        "get_account_activity must show at least "
-        f"{config.AGENT_SPIKE_MIN_PAYMENTS} payments in the window, a daily rate "
-        f"{config.AGENT_SPIKE_FACTOR:g} times the earlier daily mean or more, with at least "
-        f"{config.AGENT_MIN_HISTORY_DAYS} earlier days. Cite payments it lists."
-    ),
 }
 
 
@@ -100,9 +95,9 @@ def _pass_through(evidence: RunEvidence) -> list[Instance]:
                     ids=_capped(_unique([down_id, up["txn_id"], *same_currency])),
                     core=frozenset({down_id, up["txn_id"]}),
                     sentence=(
-                        f"Money passed through: in {currency}, payments out of the receiver came "
-                        f"to {_percent(share)}% of the alert amount, the first {gap} minutes after "
-                        "the alert."
+                        f"Money passed through: in {currency}, payments out of the receiver within "
+                        f"{config.AGENT_PASS_THROUGH_MAX_GAP_MIN} minutes came to {_percent(share)}% "
+                        f"of the alert amount, the first {gap} minutes after the alert."
                     ),
                 )
             )
@@ -166,10 +161,13 @@ def _money_returns(evidence: RunEvidence) -> list[Instance]:
 
 def _neighbours_high_risk(evidence: RunEvidence) -> list[Instance]:
     members = set(evidence.members)
+    # Only payments a graph or activity result listed. Scoring related alerts would always fire this,
+    # repeating REPEAT_ACCOUNT_ALERTS.
+    payments = evidence.payment_txn_ids
     scored = [
         n
         for n in evidence.neighbours.values()
-        if n["scored"] and n["txn_id"] not in members
+        if n["scored"] and n["txn_id"] not in members and n["txn_id"] in payments
     ]
     high = sorted(
         (n for n in scored if n["in_day_top_k"]),
@@ -213,51 +211,6 @@ def _repeat_account_alerts(evidence: RunEvidence) -> list[Instance]:
     ]
 
 
-def _activity_spike(evidence: RunEvidence) -> list[Instance]:
-    found: list[Instance] = []
-    for activity in evidence.activities_in_case_order():
-        history = activity["daily_history"]
-        if activity["history_days"] < config.AGENT_MIN_HISTORY_DAYS:
-            continue
-        in_window = activity["n_incoming"] + activity["n_outgoing"]
-        if in_window < config.AGENT_SPIKE_MIN_PAYMENTS:
-            continue
-        # Days with no payments have no entry in daily_history, so divide by the days covered.
-        daily_mean = (
-            sum(d["n_incoming"] + d["n_outgoing"] for d in history)
-            / activity["history_days"]
-        )
-        observed_h = activity["window_h"] + min(
-            activity["window_h"], activity["hours_observed_after_alert"]
-        )
-        if observed_h <= 0:
-            continue
-        daily_rate = in_window / (observed_h / 24)
-        if daily_rate < config.AGENT_SPIKE_FACTOR * daily_mean:
-            continue
-        compared = (
-            f"about {daily_rate / daily_mean:.1f} times its earlier daily mean of "
-            f"{daily_mean:.1f}"
-            if daily_mean > 0
-            else "with no payments on the earlier days"
-        )
-        found.append(
-            Instance(
-                code="ACTIVITY_SPIKE",
-                member=activity["txn_id"],
-                ids=_capped(
-                    _unique(p["txn_id"] for p in activity["incoming"] + activity["outgoing"])
-                ),
-                core=frozenset(),
-                sentence=(
-                    f"The {activity['side']}'s account made {in_window} other payments around "
-                    f"the alert, {compared}."
-                ),
-            )
-        )
-    return found
-
-
 _DETECTORS: dict[str, Callable[[RunEvidence], list[Instance]]] = {
     "PASS_THROUGH": _pass_through,
     "FAN_OUT": lambda e: _fan(e, "FAN_OUT", "sender"),
@@ -265,7 +218,6 @@ _DETECTORS: dict[str, Callable[[RunEvidence], list[Instance]]] = {
     "MONEY_RETURNS": _money_returns,
     "NEIGHBOURS_HIGH_RISK": _neighbours_high_risk,
     "REPEAT_ACCOUNT_ALERTS": _repeat_account_alerts,
-    "ACTIVITY_SPIKE": _activity_spike,
 }
 assert tuple(_DETECTORS) == FINDING_CODES
 

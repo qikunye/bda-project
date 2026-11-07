@@ -66,7 +66,7 @@ BQ1 decides which alerts an analyst sees and in what order. The agent helps inve
 | Part of the brief | What it is |
 |---|---|
 | Money flow | Where the money came from, where it went, how fast and how much stayed put, per currency. Code only |
-| Findings | Patterns, each citing the payments behind it: pass-through, fan-out, fan-in, money returning to its source, high-ranked neighbours, repeat alerts on the same accounts, activity spikes |
+| Findings | Patterns, each citing the payments behind it: pass-through, fan-out, fan-in, money returning to its source, high-ranked neighbours, repeat alerts on the same accounts |
 | Gaps | What could not be seen: no payments, a truncated window, too little time observed after the alert, too little account history |
 | Next checks | What the analyst should look at next, from a fixed list |
 | Summary | One short sentence from the LLM, with no numbers |

@@ -343,6 +343,7 @@ def _fallback_result(
         validation="fallback",
         repair_used=repair_used,
         fallback=True,
+        observations_dropped=0,
     )
     return s1
 
@@ -389,6 +390,7 @@ def run_agent(
     repair_used = False
     repairing = False
     submitted = None
+    observations_dropped = 0
 
     try:
         while submitted is None:
@@ -461,11 +463,16 @@ def run_agent(
                 "llm",
                 prompts.SUBMIT,
                 dict(submit.input),
-                {"valid": validated.ok, "errors": list(validated.errors)},
+                {
+                    "valid": validated.ok,
+                    "errors": list(validated.errors),
+                    "dropped_observations": list(validated.dropped_observations),
+                },
                 started_submit,
             )
             if validated.ok:
                 submitted = validated.brief
+                observations_dropped = len(validated.dropped_observations)
                 break
             if repair_used:
                 raise _FallbackNeeded("Brief still invalid after one repair.")
@@ -499,6 +506,7 @@ def run_agent(
             usage=usage,
             steps=steps,
             repair_used=repair_used,
+            observations_dropped=observations_dropped,
             started=started,
         )
 
@@ -521,6 +529,7 @@ def _briefed_result(
     usage: LLMUsage,
     steps: int,
     repair_used: bool,
+    observations_dropped: int,
     started: float,
 ) -> InvestigateResult:
     """Adds what code writes (sentences, gaps, money flow, case_id) to the LLM's checked brief."""
@@ -557,6 +566,7 @@ def _briefed_result(
             validation=validation,
             repair_used=repair_used,
             fallback=False,
+            observations_dropped=observations_dropped,
         ),
         trace=run.trace,
     )

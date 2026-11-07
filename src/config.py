@@ -44,12 +44,10 @@ AGENT_S1_MAX_EVIDENCE = 10  # IDs the code-only brief cites per finding.
 # of the 14-16 Sep top alerts and of ordinary accounts, then commit them before any label is read.
 # Do not tune them on results. Change one only with a note saying why and when.
 AGENT_PASS_THROUGH_MAX_GAP_MIN = 360  # PASS_THROUGH: first onward payment within this many minutes.
-AGENT_PASS_THROUGH_MIN_ONWARD_SHARE = 0.5  # ...and onward payments of at least this share of the alert amount.
+AGENT_PASS_THROUGH_MIN_ONWARD_SHARE = 0.5  # ...and onward payments within that time of at least this share of the alert amount.
 AGENT_FAN_MIN_COUNTERPARTIES = 5  # FAN_OUT / FAN_IN: distinct counterparties in the window.
 AGENT_NEIGHBOURS_HIGH_MIN = 1  # NEIGHBOURS_HIGH_RISK: neighbours in the day's top K.
-AGENT_SPIKE_FACTOR = 3.0  # ACTIVITY_SPIKE: window payments per day over the earlier daily mean.
-AGENT_SPIKE_MIN_PAYMENTS = 5  # ACTIVITY_SPIKE: at least this many payments in the window.
-AGENT_MIN_HISTORY_DAYS = 2  # Below this, SHORT_HISTORY; ACTIVITY_SPIKE needs at least this many.
+AGENT_MIN_HISTORY_DAYS = 2  # Below this, SHORT_HISTORY.
 # Below this many hours of data after the alert, "no onward payment" says nothing (SHORT_OBSERVATION).
 # Keep it equal to the PASS_THROUGH gap in hours.
 AGENT_MIN_HOURS_OBSERVED = AGENT_PASS_THROUGH_MAX_GAP_MIN / 60

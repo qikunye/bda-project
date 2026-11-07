@@ -98,3 +98,14 @@ class RunEvidence:
             for graph in self.graphs.values()
             for edge in graph["upstream"] + graph["downstream"]
         }
+
+    @property
+    def payment_txn_ids(self) -> set[str]:
+        """Payments around the case: graph edges and the accounts' other payments. Not related alerts,
+        which are top-K alerts by definition and would always look high-ranked."""
+
+        return self.edge_txn_ids | {
+            payment["txn_id"]
+            for activity in self.activities.values()
+            for payment in activity["incoming"] + activity["outgoing"]
+        }

@@ -62,6 +62,7 @@ def test_a_valid_run_returns_the_standard_result(monkeypatch):
         "validation": "valid",
         "repair_used": False,
         "fallback": False,
+        "observations_dropped": 0,
     }
     assert [f["code"] for f in result["findings"]] == [
         "PASS_THROUGH",
@@ -451,6 +452,7 @@ def test_an_alert_that_is_not_found_returns_not_found_without_calling_the_model(
 
 
 def test_gaps_are_set_by_code_from_the_tool_flags(monkeypatch):
+    monkeypatch.setattr(config, "AGENT_DATA_HORIZON", "2022-09-15 00:00:00")
     stub_tools(monkeypatch, truncated=True)
     llm = ScriptedLLM(
         turn(("get_case_graph", {"txn_id": "txn_a"})),
@@ -464,7 +466,7 @@ def test_gaps_are_set_by_code_from_the_tool_flags(monkeypatch):
         "SHORT_OBSERVATION",
         "SHORT_HISTORY",
     ]
-    assert "runs past the data available" in result["gaps"][0]["sentence"]
+    assert "runs past the end of the data" in result["gaps"][0]["sentence"]
     assert [c["code"] for c in result["next_checks"]] == ["RECHECK_AFTER_MORE_DATA"]
     assert result["money_flow"][0]["hours_observed_after_alert"] == 2.0
 
@@ -653,19 +655,26 @@ def test_observations_come_back_with_the_brief_and_are_not_changed(monkeypatch):
     assert result["fallback"] is False
 
 
-def test_an_observation_with_numbers_or_accusations_is_repaired(monkeypatch):
-    bad = valid_payload(
-        observations=[{"text": "This is money laundering.", "evidence_ids": ["txn_low"]}]
+def test_a_bad_observation_is_dropped_without_a_repair_and_logged(monkeypatch):
+    good = {"text": "The onward payments appear quick.", "evidence_ids": ["txn_low"]}
+    payload = valid_payload(
+        observations=[
+            {"text": "This is money laundering.", "evidence_ids": ["txn_low"]},
+            good,
+            {"text": "Money appears to go back to the sender.", "evidence_ids": ["txn_low"]},
+        ]
     )
-    good = valid_payload(
-        observations=[{"text": "The onward payments appear quick.", "evidence_ids": ["txn_low"]}]
-    )
-    llm = ScriptedLLM(*good_run()[:2], turn((SUBMIT, bad)), turn((SUBMIT, good)))
+    llm = ScriptedLLM(*good_run()[:2], turn((SUBMIT, payload)))
     result = run(monkeypatch, llm)
-    assert result["stats"]["validation"] == "repaired"
-    rejection = llm.calls[3]["messages"][-1]["content"][0]["toolResult"]["content"][0]["text"]
-    assert "not accuse" in rejection
-    assert result["observations"][0]["text"] == "The onward payments appear quick."
+    assert result["fallback"] is False
+    assert result["stats"]["validation"] == "valid"
+    assert result["stats"]["repair_used"] is False
+    assert result["stats"]["observations_dropped"] == 2
+    assert result["observations"] == [good]
+    assert [f["code"] for f in result["findings"]] == ["PASS_THROUGH", "NEIGHBOURS_HIGH_RISK"]
+    submit_step = next(s for s in result["trace"] if s["tool"] == SUBMIT)
+    dropped = " ".join(submit_step["result"]["dropped_observations"])
+    assert "not accuse" in dropped and "describes MONEY_RETURNS" in dropped
 
 
 def test_a_fallback_brief_has_no_observations(monkeypatch):

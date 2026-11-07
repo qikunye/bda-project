@@ -287,6 +287,7 @@ def _result(
         validation="valid",
         repair_used=False,
         fallback=False,
+        observations_dropped=0,
     )
     if summary is not None:
         rejected = {"valid": False, "errors": ["Cited an ID that no tool returned."]}

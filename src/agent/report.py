@@ -68,6 +68,8 @@ def summarise_runs(results: list[dict], failures: list[dict], spent_usd: float) 
         "cases_with_findings": sum(bool(r["findings"]) for r in runs),
         "cases_with_observations": sum(bool(r["observations"]) for r in runs),
         "observations": sum(len(r["observations"]) for r in runs),
+        # .get: results saved before this field existed have none.
+        "observations_dropped": sum(r["stats"].get("observations_dropped", 0) for r in runs),
         "gap_counts": dict(
             Counter(g["code"] for r in runs for g in r["gaps"]).most_common()
         ),
@@ -98,7 +100,8 @@ def print_summary(summary: dict, athena_gb: float, seconds: float) -> None:
             print(f"  {count} x {reason}")
     print(f"Cases with at least one finding: {summary['cases_with_findings']}")
     print(
-        f"Observations: {summary['observations']} in {summary['cases_with_observations']} cases"
+        f"Observations: {summary['observations']} in {summary['cases_with_observations']} cases, "
+        f"{summary['observations_dropped']} dropped by the validator"
     )
     print("Findings:", summary["finding_counts"])
     print("Gaps:", summary["gap_counts"])

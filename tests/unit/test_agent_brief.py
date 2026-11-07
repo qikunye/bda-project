@@ -39,12 +39,27 @@ def test_no_payments_for_another_member_is_not_a_gap():
     assert "NO_GRAPH_AVAILABLE" not in gap_codes(evidence)
 
 
-def test_truncation_and_short_observation_follow_the_flags():
+def test_a_run_cutoff_gives_short_observation_but_not_a_truncated_window():
     evidence = make_evidence(truncated=True)  # Data visible to 12:00, two hours after the alert.
     gaps = brief.compute_gaps(evidence)
-    assert [g["code"] for g in gaps] == ["TRUNCATED_WINDOW", "SHORT_OBSERVATION"]
-    assert "(2022-09-14 12:00:00)" in gaps[0]["sentence"]
-    assert "Only 2 h of data" in gaps[1]["sentence"]
+    assert [g["code"] for g in gaps] == ["SHORT_OBSERVATION"]
+    assert "Only 2 h of data" in gaps[0]["sentence"]
+
+
+def test_a_day_end_cutoff_alone_gives_no_gap():
+    # A daily run sees its day to 23:59:59, so a 48 h window always passes its cutoff.
+    evidence = make_evidence()
+    evidence.record("get_case_graph", graph_result("txn_a", as_of="2022-09-14 23:59:59"))
+    assert brief.compute_gaps(evidence) == []
+
+
+def test_a_window_past_the_end_of_the_data_is_a_truncated_window(monkeypatch):
+    monkeypatch.setattr(config, "AGENT_DATA_HORIZON", "2022-09-15 00:00:00")
+    evidence = make_evidence()
+    evidence.record("get_case_graph", graph_result("txn_a"))
+    gaps = brief.compute_gaps(evidence)
+    assert [g["code"] for g in gaps] == ["TRUNCATED_WINDOW"]
+    assert "runs past the end of the data (2022-09-15 00:00:00)" in gaps[0]["sentence"]
 
 
 @pytest.mark.parametrize(
@@ -100,7 +115,7 @@ def test_the_next_check_table_matches_the_plan():
         "CHECK_SOURCE_ACCOUNTS": {"PASS_THROUGH", "FAN_IN"},
         "CHECK_RETURN_FLOW": {"MONEY_RETURNS"},
         "REVIEW_RELATED_ALERTS": {"REPEAT_ACCOUNT_ALERTS", "NEIGHBOURS_HIGH_RISK"},
-        "CHECK_ACCOUNT_HISTORY": {"ACTIVITY_SPIKE", "SHORT_HISTORY"},
+        "CHECK_ACCOUNT_HISTORY": {"SHORT_HISTORY"},
         "RECHECK_AFTER_MORE_DATA": {"SHORT_OBSERVATION", "TRUNCATED_WINDOW"},
     }
 
