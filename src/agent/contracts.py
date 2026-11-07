@@ -52,7 +52,8 @@ class CurrencyFlow(TypedDict):
 
     upstream_total: float
     downstream_total: float
-    # downstream_total / upstream_total; null when nothing came in. Can be above 1.
+    # downstream_total / the alert amount, in the alert's own currency only (null in other currencies
+    # and when the alert has no amount). Can be above 1.
     onward_share: float | None
     # Minutes from the alert to the first and the median onward payment; null when none went on.
     fastest_onward_gap_minutes: int | None
@@ -199,12 +200,20 @@ class Finding(TypedDict):
     evidence_ids: list[str]
 
 
+class Observation(TypedDict):
+    """A remark the LLM wrote itself. Code checks the IDs and wording, not that it is right."""
+
+    text: str  # At most AGENT_OBSERVATION_MAX_CHARS, no numbers, no accusations.
+    evidence_ids: list[str]
+
+
 class Brief(TypedDict):
     """What the LLM submits and code accepts. Gaps, money flow and sentences are added by code."""
 
     findings: list[Finding]
     next_checks: list[NextCheckCode]
     summary: str  # At most AGENT_SUMMARY_MAX_CHARS, no numbers.
+    observations: list[Observation]  # Not verified by the finding rules. May be empty.
 
 
 class RenderedFinding(TypedDict):
@@ -275,6 +284,8 @@ class InvestigateResult(TypedDict):
     findings: list[RenderedFinding]
     gaps: list[RenderedGap]
     next_checks: list[RenderedNextCheck]
+    # The LLM's own remarks. Empty when code alone built the brief. Show them as the agent's reading.
+    observations: list[Observation]
     # One per member, best rank first. Empty when status is "not_found".
     money_flow: list[MemberMoneyFlow]
     members: list[CaseMember]
@@ -302,6 +313,7 @@ class DecisionRow(TypedDict, total=False):
     gap_codes: list[GapCode]
     next_check_codes: list[NextCheckCode]
     summary: str
+    observation_count: int
     fallback: bool
     repair_used: bool
     steps: int

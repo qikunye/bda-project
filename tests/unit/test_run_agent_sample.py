@@ -10,6 +10,7 @@ def result(
     validation="valid",
     *,
     findings=("PASS_THROUGH",),
+    observations=0,
     tokens=(1000, 200),
     reason=None,
     errors=(),
@@ -28,6 +29,7 @@ def result(
         "status": "ok",
         "findings": [{"code": code} for code in findings],
         "gaps": [{"code": "TRUNCATED_WINDOW"}],
+        "observations": [{"text": "x", "evidence_ids": ["txn_a"]}] * observations,
         "stats": {
             "validation": validation,
             "fallback": validation == "fallback",
@@ -78,7 +80,7 @@ def test_errored_and_missing_cases_are_counted_separately():
     summary = summarise_runs(
         [
             result(),
-            {"status": "not_found", "stats": None, "findings": [], "gaps": [], "trace": []},
+            {"status": "not_found", "stats": None, "findings": [], "gaps": [], "observations": [], "trace": []},
         ],
         [{"error": "boom"}],
         0.5,
@@ -96,6 +98,11 @@ def test_findings_and_gaps_are_counted():
     assert summary["finding_counts"] == {"PASS_THROUGH": 2, "FAN_OUT": 1}
     assert summary["cases_with_findings"] == 2
     assert summary["gap_counts"] == {"TRUNCATED_WINDOW": 3}
+
+
+def test_observations_are_counted():
+    summary = summarise_runs([result(observations=2), result(), result(observations=1)], [], 0)
+    assert summary["observations"] == 3 and summary["cases_with_observations"] == 2
 
 
 def test_no_runs_gives_no_rates():

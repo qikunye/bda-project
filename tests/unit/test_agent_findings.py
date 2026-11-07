@@ -30,7 +30,7 @@ def test_pass_through_needs_money_in_and_a_fast_share_out():
     found = instance(make_evidence(), "PASS_THROUGH")
     assert found.core == {"txn_high", "txn_up"}  # The first payment out and one payment in.
     assert found.ids[:2] == ("txn_high", "txn_up")
-    assert "80% of what came in" in found.sentence
+    assert "80% of the alert amount" in found.sentence
     assert "15 minutes after the alert" in found.sentence
 
 
@@ -56,10 +56,52 @@ def test_pass_through_at_the_exact_thresholds_is_found():
         graph_result(
             "txn_a",
             down_gap=config.AGENT_PASS_THROUGH_MAX_GAP_MIN,
-            down_amount=1000.0 * config.AGENT_PASS_THROUGH_MIN_ONWARD_SHARE / 2,
+            down_amount=1000.5 * config.AGENT_PASS_THROUGH_MIN_ONWARD_SHARE / 2,
         ),
     )
     assert "PASS_THROUGH" in codes(evidence)
+
+
+def test_pass_through_is_judged_against_the_alert_amount_not_what_the_sender_took_in():
+    # The sender took in 1,000,000 and the alert sent 1,000.5 on. The receiver passed all of it on.
+    evidence = make_evidence(ranks={})
+    evidence.record(
+        "get_case_graph",
+        graph_result("txn_a", up_amount=1_000_000.0, down_amount=500.25),  # Two payments of 500.25.
+    )
+    assert "PASS_THROUGH" in codes(evidence)
+    assert "100% of the alert amount" in instance(evidence, "PASS_THROUGH").sentence
+
+
+def test_a_large_inflow_to_the_sender_does_not_make_a_small_onward_payment_pass_through():
+    evidence = make_evidence(ranks={})
+    evidence.record("get_case_graph", graph_result("txn_a", up_amount=10.0, down_amount=100.0))
+    assert "PASS_THROUGH" not in codes(evidence)  # 200 out of 1,000.5 is only 20% of the alert.
+
+
+def test_onward_payments_in_another_currency_cannot_be_compared_with_the_alert():
+    # The alert is in dollars. Euros came in and went out, but that says nothing about the alert.
+    alert = alert_result("txn_a")
+    frame = pd.DataFrame(
+        [
+            {
+                "edge_role": role,
+                "transaction_id": txn,
+                "source_account_key": "9|SRC" if role == "UPSTREAM" else alert["receiver"],
+                "target_account_key": alert["sender"] if role == "UPSTREAM" else "3|C",
+                "transaction_timestamp": "2022-09-14 10:10:00.000",
+                "gap_minutes": "10",
+                "amount_paid": "5000.000000",
+                "payment_currency": "Euro",
+                "payment_format": "ACH",
+            }
+            for role, txn in (("UPSTREAM", "txn_eu_up"), ("DOWNSTREAM", "txn_eu_down"))
+        ]
+    )
+    evidence = make_evidence(ranks={})
+    evidence.record("get_case_graph", tools.case_graph_from_frame(alert, frame, 48))
+    assert evidence.graphs["txn_a"]["flow"]["Euro"]["onward_share"] is None
+    assert "PASS_THROUGH" not in codes(evidence)
 
 
 def test_pass_through_never_mixes_currencies():
@@ -201,6 +243,14 @@ def test_repeat_account_alerts_cites_the_related_alerts():
     found = instance(evidence, "REPEAT_ACCOUNT_ALERTS")
     assert found.ids == ("txn_x", "txn_y")
     assert "top 500" in found.sentence and ": 2," in found.sentence
+
+
+def test_other_case_members_are_not_repeat_alerts():
+    # Members share accounts by construction, so only alerts outside the case count.
+    evidence = make_evidence(members=("txn_a", "txn_b"), related=related_result("txn_b"))
+    assert "REPEAT_ACCOUNT_ALERTS" not in codes(evidence)
+    mixed = make_evidence(members=("txn_a", "txn_b"), related=related_result("txn_b", "txn_x"))
+    assert instance(mixed, "REPEAT_ACCOUNT_ALERTS").ids == ("txn_x",)
 
 
 def test_no_related_alerts_or_no_call_is_not_a_finding():

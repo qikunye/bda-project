@@ -119,6 +119,7 @@ def test_brief_case_returns_the_standard_result(monkeypatch):
     assert result["txn_id"] == "txn_a"
     assert result["case_id"] == "case_txn_a"
     assert result["fallback"] is False
+    assert result["observations"] == []  # Only the LLM writes observations.
     assert codes(result) == [
         "PASS_THROUGH",
         "NEIGHBOURS_HIGH_RISK",
@@ -141,6 +142,15 @@ def test_brief_case_returns_the_standard_result(monkeypatch):
     # Five tool calls per member (alert, graph, two activity, neighbours), and one related-alerts call.
     assert len(result["trace"]) == 11
     json.dumps(result)
+
+
+def test_other_case_members_are_not_repeat_alerts(monkeypatch):
+    calls = stub_tools(monkeypatch)
+    result = baseline.brief_case(None, case_of("txn_a", "txn_b"))
+    related = next(c for c in calls if c[0] == "get_related_alerts")
+    assert related[2] == ("txn_a", "txn_b")
+    repeat = next(f for f in result["findings"] if f["code"] == "REPEAT_ACCOUNT_ALERTS")
+    assert repeat["evidence_ids"] == ["txn_ext"]
 
 
 def test_brief_case_runs_the_activity_tool_for_both_sides_of_every_member(monkeypatch):
@@ -266,6 +276,7 @@ def rows_for(representative, finding_codes=(), *, members=()):
         "findings": [{"code": c} for c in finding_codes],
         "gaps": [{"code": "TRUNCATED_WINDOW"}],
         "next_checks": [],
+        "observations": [],
         "stats": {
             "fallback": False,
             "repair_used": False,

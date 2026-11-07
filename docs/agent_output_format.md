@@ -21,8 +21,8 @@ All sample IDs, numbers and sentences are invented, and `stats["model"]` is `"sa
 | Sample | What your screen should handle |
 |---|---|
 | `pass_through` | One finding, with money in and out. No gaps. A single alert, so `case_id` is `None` |
-| `fan_out_case` | A case of two alerts, with several findings (fan-out, fan-in, neighbours, repeat alerts, activity spike) |
-| `money_returns` | Money that went back to an account it came from |
+| `fan_out_case` | A case of two alerts, with several findings (fan-out, fan-in, neighbours, repeat alerts, activity spike) and one observation |
+| `money_returns` | Money that went back to an account it came from, with one observation |
 | `quiet_truncated` | No findings, and two gaps: the window runs past the data, and too little time is observed. This is normal for batch results |
 | `no_graph` | A self-transfer: no payments, `amount`, `currency` and `payment_format` are `None`, and the only gap is `NO_GRAPH_AVAILABLE` |
 | `code_only` | A brief built by code alone (S1), with the template summary |
@@ -39,6 +39,7 @@ All sample IDs, numbers and sentences are invented, and `stats["model"]` is `"sa
 | `findings` | Patterns, each with the payments behind it (`evidence_ids`) | The LLM picks the code and the evidence; code checks it and writes the sentence |
 | `gaps` | What the agent could not see or check | Code only |
 | `next_checks` | What the analyst should look at next | The LLM picks from a fixed list; code checks it and writes the sentence |
+| `observations` | Up to three short remarks beyond the findings, each with the IDs it is about | The LLM writes them. Code checks the IDs and wording only, not that they are right |
 
 There is **no verdict and no confidence**. Do not show a "raise" or "risk" badge from the agent. The BQ1 score and rank still come from `alert`.
 
@@ -62,6 +63,7 @@ It takes about 20 seconds or more, so show a spinner. Unlike the batch it has no
 | `findings` | list of `{code, sentence, evidence_ids}` | One line each, with clickable evidence IDs. May be empty: that means no pattern was found, not that the alert is harmless |
 | `gaps` | list of `{code, sentence}` | Show next to the findings, as a warning-style note |
 | `next_checks` | list of `{code, sentence}` | A short checklist |
+| `observations` | list of `{text, evidence_ids}` | Show apart from the findings, labelled as the agent's reading and not checked. May be empty, and is always empty when `fallback` is `True` |
 | `money_flow` | list of `MemberMoneyFlow`, best rank first | A small table or card per alert |
 | `members` | list of `{alert, graph}`, best rank first | Every alert in the case with its payments, so the analyst needn't look them up |
 | `fallback` | `bool` | `True` means code alone built the brief (no LLM). Label it clearly |
@@ -75,7 +77,7 @@ It takes about 20 seconds or more, so show a spinner. Unlike the batch it has no
 | `txn_id` | The alert it describes |
 | `no_graph` | `True` if there are no payments to look at (such as a self-transfer) |
 | `n_upstream`, `n_downstream` | Payments into the sender before the alert, and out of the receiver after it |
-| `per_currency[currency]` | `upstream_total`, `downstream_total`, `onward_share` (downstream over upstream, can be above 1, `None` if nothing came in), `fastest_onward_gap_minutes` and `median_onward_gap_minutes` (minutes from the alert to an onward payment, `None` if nothing went on), and `fastest_onward_txn_id` |
+| `per_currency[currency]` | `upstream_total`, `downstream_total`, `onward_share` (onward payments as a share of the alert amount, only in the alert's own currency, so `None` in other currencies; can be above 1), `fastest_onward_gap_minutes` and `median_onward_gap_minutes` (minutes from the alert to an onward payment, `None` if nothing went on), and `fastest_onward_txn_id` |
 | `hours_observed_after_alert` | How long after the alert the data reaches, capped at the window. "Nothing went on" only means something if this is large |
 
 ## Finding codes
@@ -84,7 +86,7 @@ Use these as labels or icons. Always show the `sentence`, not just the code.
 
 | Code | Meaning |
 |---|---|
-| `PASS_THROUGH` | Money came in and went on quickly |
+| `PASS_THROUGH` | Money came in, and payments out of the receiver soon after came to a large share of the alert amount |
 | `FAN_OUT` | The sender paid many different accounts around the alert |
 | `FAN_IN` | The receiver was paid by many different accounts around the alert |
 | `MONEY_RETURNS` | Money went back to an account it came from, or to the alert's sender |
@@ -125,7 +127,7 @@ Read `is459_agent_decisions` by `transaction_id`, using the IDs in the day's que
 | `representative` | The alert the agent reviewed for this case | Yes |
 | `member` | Another alert in the same case | No: use `representative_txn_id` to find it |
 
-Each row stores `finding_codes`, `gap_codes` and `next_check_codes` (lists of codes), so a badge or a filter does not need the trace. Rows no longer have `verdict`, `confidence` or `claims`. A natural list badge is the number of findings, or the finding codes as small tags.
+Each row stores `finding_codes`, `gap_codes`, `next_check_codes` (lists of codes) and `observation_count` (the observation text lives in the saved result), so a badge or a filter does not need the trace. Rows no longer have `verdict`, `confidence` or `claims`. A natural list badge is the number of findings, or the finding codes as small tags.
 
 Rows don't store the rendered sentences. `investigate()` returns them directly. For batch rows, read the object at `trace_key`: its `result` has the same fields as `investigate()`.
 
@@ -137,6 +139,7 @@ Rows don't store the rendered sentences. `investigate()` returns them directly. 
 
 - **Show `sentence`; treat `summary` as optional extra text.** Sentences get their numbers from tool results. `summary` is written by the LLM and contains no numbers.
 - **Do not show BQ1 reasons** (D32). `alert` has no `reasons` field. The reasons carry almost no information (F35): the same two appear on all 300 top alerts, and some contain "nan". Keep the app's existing risk-score and rank display.
+- **Observations are not verified.** Unlike findings, nothing checks that an observation is right. Label them clearly, never give them the weight of a finding, and keep them out of any count or filter built on findings.
 - **Never add amounts across currencies.** Every total is already split by currency.
 - **Never remove or hide an alert.** The BQ1 order is the order.
 - **Findings are evidence, not accusations.** An empty `findings` list does not mean an alert is safe, and a finding does not mean it is laundering.

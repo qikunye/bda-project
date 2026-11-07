@@ -108,7 +108,7 @@ def brief_case(
             accounts,
             lead["ts"],
             settings.window_h,
-            exclude_txn_ids=(case.representative_txn_id,),
+            exclude_txn_ids=tuple(case.member_txn_ids),
             top_k=settings.top_k,
             as_of=settings.as_of,
         ),
@@ -155,6 +155,7 @@ def brief_from_evidence(
         findings=brief.render_findings(found, instances),
         gaps=gaps,
         next_checks=brief.render_next_checks(checks),
+        observations=[],  # Only the LLM writes these.
         money_flow=brief.build_money_flow(members),
         members=members,
         fallback=False,

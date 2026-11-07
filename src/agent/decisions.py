@@ -48,6 +48,7 @@ def build_decision_rows(
             gap_codes=[g["code"] for g in result["gaps"]],
             next_check_codes=[c["code"] for c in result["next_checks"]],
             summary=result["summary"],
+            observation_count=len(result["observations"]),
             fallback=stats["fallback"],
             repair_used=stats["repair_used"],
             steps=stats["steps"],

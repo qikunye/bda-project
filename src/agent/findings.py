@@ -15,9 +15,9 @@ FINDING_CODES: tuple[str, ...] = get_args(FindingCode)
 REQUIREMENTS: dict[str, str] = {
     "PASS_THROUGH": (
         "get_case_graph must show money coming in and going on within "
-        f"{config.AGENT_PASS_THROUGH_MAX_GAP_MIN} minutes of the alert, with at least "
-        f"{round(config.AGENT_PASS_THROUGH_MIN_ONWARD_SHARE * 100)}% of it going on, in one "
-        "currency. Cite one payment in and the first payment out."
+        f"{config.AGENT_PASS_THROUGH_MAX_GAP_MIN} minutes of the alert, with onward payments of at "
+        f"least {round(config.AGENT_PASS_THROUGH_MIN_ONWARD_SHARE * 100)}% of the alert amount, in "
+        "the alert's currency. Cite one payment in and the first payment out."
     ),
     "FAN_OUT": (
         "get_account_activity with side=sender must show payments to at least "
@@ -100,8 +100,9 @@ def _pass_through(evidence: RunEvidence) -> list[Instance]:
                     ids=_capped(_unique([down_id, up["txn_id"], *same_currency])),
                     core=frozenset({down_id, up["txn_id"]}),
                     sentence=(
-                        f"Money passed through: in {currency}, {_percent(share)}% of what came "
-                        f"in went on, the first payment out {gap} minutes after the alert."
+                        f"Money passed through: in {currency}, payments out of the receiver came "
+                        f"to {_percent(share)}% of the alert amount, the first {gap} minutes after "
+                        "the alert."
                     ),
                 )
             )
@@ -192,10 +193,12 @@ def _neighbours_high_risk(evidence: RunEvidence) -> list[Instance]:
 
 def _repeat_account_alerts(evidence: RunEvidence) -> list[Instance]:
     related = evidence.related
-    if not related or not related["alerts"]:
+    # The case's own members share these accounts by construction, so they are not repeats.
+    outside = [a for a in (related["alerts"] if related else []) if a["txn_id"] not in evidence.members]
+    if not outside:
         return []
-    txn_ids = _unique(a["txn_id"] for a in related["alerts"])  # Already best rank first.
-    accounts = {a["account"] for a in related["alerts"]}
+    txn_ids = _unique(a["txn_id"] for a in outside)  # Already best rank first.
+    accounts = {a["account"] for a in outside}
     return [
         Instance(
             code="REPEAT_ACCOUNT_ALERTS",

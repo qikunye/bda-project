@@ -70,6 +70,7 @@ BQ1 decides which alerts an analyst sees and in what order. The agent helps inve
 | Gaps | What could not be seen: no payments, a truncated window, too little time observed after the alert, too little account history |
 | Next checks | What the analyst should look at next, from a fixed list |
 | Summary | One short sentence from the LLM, with no numbers |
+| Observations | Up to three short remarks of the LLM's own, citing the payments they are about. Shown as its reading, since the rules do not check them |
 
 The main safeguards:
 

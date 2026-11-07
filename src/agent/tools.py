@@ -163,10 +163,17 @@ def _returned_to_source(
     return returned[:limit]
 
 
-def _flow(upstream: pd.DataFrame, downstream: pd.DataFrame) -> dict[str, CurrencyFlow]:
-    """Per currency: how much of the incoming money went on, and how fast. All edges, not only shown."""
+def _flow(
+    alert: Alert, upstream: pd.DataFrame, downstream: pd.DataFrame
+) -> dict[str, CurrencyFlow]:
+    """Per currency: the money in and out, and how fast it went on. All edges, not only shown.
+
+    ``onward_share`` compares the receiver's onward payments with the alert amount, because the alert
+    is the payment that links the two accounts. It exists only in the alert's own currency.
+    """
 
     up_totals, down_totals = _currency_totals(upstream), _currency_totals(downstream)
+    alert_amount = alert.get("amount") or 0.0
     flow: dict[str, CurrencyFlow] = {}
     for currency in sorted(set(up_totals) | set(down_totals)):
         onward = downstream[downstream["payment_currency"] == currency]
@@ -174,7 +181,9 @@ def _flow(upstream: pd.DataFrame, downstream: pd.DataFrame) -> dict[str, Currenc
         flow[currency] = CurrencyFlow(
             upstream_total=total_in,
             downstream_total=total_out,
-            onward_share=round(total_out / total_in, 3) if total_in > 0 else None,
+            onward_share=round(total_out / alert_amount, 3)
+            if alert_amount > 0 and currency == alert.get("currency")
+            else None,
             fastest_onward_gap_minutes=int(onward["gap_minutes"].iloc[0])
             if len(onward)
             else None,
@@ -248,7 +257,7 @@ def case_graph_from_frame(
         sides["DOWNSTREAM"],
         config.AGENT_MAX_RETURNED_TO_SOURCE,
     )
-    flow = _flow(sides["UPSTREAM"], sides["DOWNSTREAM"])
+    flow = _flow(alert, sides["UPSTREAM"], sides["DOWNSTREAM"])
     return CaseGraph(
         txn_id=alert["txn_id"],
         window_h=window_h,
