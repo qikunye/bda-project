@@ -75,6 +75,20 @@ def test_case_graph_query_prunes_to_the_window_dates():
     assert "BETWEEN DATE '2022-09-14' AND DATE '2022-09-16'" in statement
 
 
+def test_case_graph_query_stops_downstream_at_the_cutoff():
+    statement = sql.build_case_graph_query(
+        SENDER, RECEIVER, "2022-09-14 10:00:00", 48, as_of="2022-09-14 23:59:59"
+    )
+    assert "BETWEEN DATE '2022-09-14' AND DATE '2022-09-14'" in statement
+    assert statement.count("transaction_timestamp <= TIMESTAMP '2022-09-14 23:59:59'") == 1
+    assert "BETWEEN DATE '2022-09-12' AND DATE '2022-09-14'" in statement  # Upstream unchanged.
+
+
+def test_case_graph_query_rejects_a_bad_cutoff():
+    with pytest.raises(ValueError):
+        sql.build_case_graph_query(SENDER, RECEIVER, TS, 48, as_of="x' --")
+
+
 def test_neighbour_query_filters_dates_and_ids():
     statement = sql.build_neighbour_scores_query(
         [TXN, "txn_b", TXN], ["2022-09-15", "2022-09-14", "2022-09-15"]

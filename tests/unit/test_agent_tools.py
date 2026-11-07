@@ -267,6 +267,22 @@ def test_window_truncated_follows_data_horizon(ts, window_h, truncated):
     assert get_graph([], ts=ts, window_h=window_h)["window_truncated"] is truncated
 
 
+def test_a_cutoff_truncates_the_window_and_is_reported():
+    graph = get_graph([], as_of="2022-09-14 23:59:59")
+    assert graph["window_truncated"] is True
+    assert graph["horizon_end"] == "2022-09-14 23:59:59"
+
+
+def test_a_cutoff_past_the_window_does_not_truncate():
+    graph = get_graph([], window_h=6, as_of="2022-09-14 23:59:59")
+    assert graph["window_truncated"] is False
+
+
+def test_a_cutoff_cannot_extend_past_the_data_horizon():
+    graph = get_graph([], as_of="2099-01-01 00:00:00")
+    assert graph["horizon_end"] == config.AGENT_DATA_HORIZON
+
+
 def test_case_graph_requires_found_alert():
     data, _ = data_for()
     with pytest.raises(ValueError):
@@ -393,6 +409,26 @@ def test_related_alerts_filters_accounts_window_and_anchor():
 
     tools.get_related_alerts(data, [SENDER], "2022-09-14 11:00:00", 24)
     assert len(fake.calls) == 2  # day queues come from the cache
+
+
+def test_related_alerts_hide_anything_after_the_cutoff():
+    queues = {
+        "2022-09-14": pd.DataFrame(
+            [
+                queue_row("txn_before", RECEIVER, "60|F", "2022-09-14 12:00:00.000", 4),
+                queue_row("txn_late", RECEIVER, "60|F", "2022-09-14 23:59:59.000", 5),
+            ]
+        ),
+        "2022-09-15": pd.DataFrame(
+            [queue_row("txn_next", RECEIVER, "60|F", "2022-09-15 01:00:00.000", 6)]
+        ),
+    }
+    data, fake = data_for(queues=queues)
+    result = tools.get_related_alerts(
+        data, [RECEIVER], "2022-09-14 10:00:00", 48, as_of="2022-09-14 23:59:59"
+    )
+    assert [a["txn_id"] for a in result["alerts"]] == ["txn_before", "txn_late"]
+    assert len(fake.calls) == 1  # The next day's queue is never read.
 
 
 # --- AgentData ---------------------------------------------------------------------------

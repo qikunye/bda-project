@@ -4,6 +4,7 @@ Tools call ``AgentData.query``. Repeated statements are served from the cache, s
 repeated tool calls do not re-bill Athena (PLAN.md 5.2).
 """
 
+import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -33,30 +34,36 @@ class AgentData:
     cache_size: int = 512
     scan_log: list[ScanLogEntry] = field(default_factory=list)
     _cache: OrderedDict = field(default_factory=OrderedDict, repr=False)
+    # The batch runs several cases at once, and they share this cache and log.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def query(self, sql: str, label: str) -> pd.DataFrame:
         assert_label_free(sql)
-        if sql in self._cache:
-            self._cache.move_to_end(sql)
-            self.scan_log.append(ScanLogEntry(label, 0, 0, cached=True))
-            return self._cache[sql].copy()
+        with self._lock:
+            if sql in self._cache:
+                self._cache.move_to_end(sql)
+                self.scan_log.append(ScanLogEntry(label, 0, 0, cached=True))
+                return self._cache[sql].copy()
 
+        # The query runs outside the lock. Two cases asking for the same SQL at once both run it.
         frame, stats = self.runner(sql)
         leaked = {c.lower() for c in frame.columns} & config.AGENT_FORBIDDEN_COLUMNS
         if leaked:
             raise LabelLeakError(f"Result contains forbidden columns: {sorted(leaked)}")
 
-        self.scan_log.append(
-            ScanLogEntry(label, stats.bytes_scanned, stats.engine_ms, cached=False)
-        )
-        self._cache[sql] = frame
-        if len(self._cache) > self.cache_size:
-            self._cache.popitem(last=False)
+        with self._lock:
+            self.scan_log.append(
+                ScanLogEntry(label, stats.bytes_scanned, stats.engine_ms, cached=False)
+            )
+            self._cache[sql] = frame
+            if len(self._cache) > self.cache_size:
+                self._cache.popitem(last=False)
         return frame.copy()
 
     @property
     def bytes_scanned(self) -> int:
-        return sum(entry.bytes_scanned for entry in self.scan_log)
+        with self._lock:
+            return sum(entry.bytes_scanned for entry in self.scan_log)
 
 
 def athena_runner(client=None) -> Runner:
