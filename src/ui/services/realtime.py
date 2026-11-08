@@ -1,6 +1,10 @@
-"""Bounded keyed reads using PLAN.md F21; no chronological listing contract is available."""
+"""Bounded keyed reads mapped from rt/code writer exports and sampled DynamoDB items."""
 
+import json
+import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Literal
 
 import boto3
@@ -30,12 +34,17 @@ STATUS_LABELS = {
 class AlertSummary:
     txn: str
     amount: str | None = None
-    # Presentation fields only: live field names for these have not been verified.
+    # txn_ts is the dataset transaction time; scoring/arrival timestamps are separate.
     timestamp: str | None = None
     sender: str | None = None
     receiver: str | None = None
     currency: str | None = None
     score: float | None = None
+    payment_format: str | None = None
+    model_version: str | None = None
+    scored_at: str | None = None
+    arrival_at: str | None = None
+    ingest_to_score_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +55,9 @@ class Explanation:
     typology: str | None = None
     completed_at: str | None = None
     content_mapped: bool = False
+    pipeline_status: str | None = None
+    model_version: str | None = None
+    latency_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -77,21 +89,67 @@ def _identity(item: dict | None, txn: str) -> None:
         raise RealtimeSchemaError("The record does not match the requested txn key.")
 
 
+def _text(item: dict, key: str) -> str | None:
+    value = item.get(key)
+    if value is not None and not isinstance(value, str):
+        raise RealtimeSchemaError(f"{key} must be a string when present.")
+    return value
+
+
+def _number(item: dict, key: str) -> float | None:
+    value = item.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)) or not math.isfinite(value):
+        raise RealtimeSchemaError(f"{key} must be a finite DynamoDB number when present.")
+    return float(value)
+
+
+def _epoch_ms(item: dict, key: str) -> str | None:
+    value = _number(item, key)
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(value / 1000, timezone.utc).isoformat(timespec="milliseconds")
+    except (ValueError, OverflowError, OSError) as error:
+        raise RealtimeSchemaError("Stored epoch timestamp is outside the supported range.") from error
+
+
 def map_documented_alert(item: dict | None, txn: str) -> AlertSummary | None:
-    """Only txn and amount are documented with exact field names (PLAN.md F21)."""
+    """Map app.py's base/ALERTS item; do not read model reasons, ranks or raw features."""
     _identity(item, txn)
     if item is None:
         return None
-    amount = item.get("amount")
-    if amount is not None and not isinstance(amount, str):
-        raise RealtimeSchemaError("The documented alert amount must be a string when present.")
-    return AlertSummary(txn, amount=amount)
+    return AlertSummary(
+        txn, amount=_text(item, "amount"), timestamp=_text(item, "txn_ts"),
+        sender=_text(item, "sender"), receiver=_text(item, "receiver"), currency=_text(item, "currency"),
+        score=_number(item, "score"), payment_format=_text(item, "payment_format"),
+        model_version=_text(item, "model_version"), scored_at=_epoch_ms(item, "scored_at_ms"),
+        arrival_at=_epoch_ms(item, "arrival_ms"), ingest_to_score_ms=_number(item, "ingest_to_score_ms"),
+    )
 
 
 def map_documented_brief(item: dict | None, txn: str) -> Explanation | None:
-    """Do not guess narrative/next-check/typology attribute names or expose raw records."""
+    """Map explainer_app.py's DynamoDB item; next_checks is S(JSON), not a native list."""
     _identity(item, txn)
-    return Explanation(txn) if item is not None else None
+    if item is None:
+        return None
+    raw_checks = _text(item, "next_checks")
+    try:
+        checks = json.loads(raw_checks) if raw_checks is not None else []
+    except ValueError as error:
+        raise RealtimeSchemaError("Stored next_checks is not valid JSON.") from error
+    if not isinstance(checks, list) or not all(isinstance(check, str) for check in checks):
+        raise RealtimeSchemaError("Stored next_checks must encode a list of strings.")
+    status = _text(item, "status")
+    if status is not None and status not in {"ok", "needs_review"}:
+        raise RealtimeSchemaError("Unknown explainer processing status.")
+    return Explanation(
+        txn, narrative=_text(item, "narrative"), next_checks=tuple(checks), typology=_text(item, "typology"),
+        # written_at_ms exists in the S3 JSON, but the DynamoDB writer does not persist it.
+        completed_at=None, content_mapped=bool({"narrative", "next_checks", "typology", "status"} & item.keys()),
+        pipeline_status=status, model_version=_text(item, "model_version"), latency_ms=_number(item, "latency_ms"),
+    )
 
 
 class RealtimeService:

@@ -64,16 +64,29 @@ def render_realtime_record(record: RealtimeRecord) -> None:
             amount.metric("Transaction amount", alert.amount if alert.amount is not None else UNAVAILABLE)
             score.metric("BQ1 score · ranking signal", f"{alert.score:.4f}" if alert.score is not None else UNAVAILABLE)
             st.text(f"Currency: {alert.currency or UNAVAILABLE}")
+            if alert.payment_format:
+                st.text(f"Payment format: {alert.payment_format}")
             st.caption("A BQ1 score supports ranking; it is not a calibrated laundering probability. "
                        "Amounts are not combined across currencies.")
+            if any(value is not None for value in (alert.scored_at, alert.arrival_at, alert.model_version)):
+                with st.expander("Scoring provenance", expanded=False):
+                    st.text(f"Scorer model version: {alert.model_version or UNAVAILABLE}")
+                    st.text(f"Scored at: {timestamp_text(alert.scored_at)}")
+                    st.text(f"Kinesis arrival timestamp: {timestamp_text(alert.arrival_at)}")
+                    if alert.ingest_to_score_ms is not None:
+                        st.text(f"Reported ingest-to-score latency: {alert.ingest_to_score_ms:g} ms")
     if record.brief is not None:
         st.subheader("Real-time explanation")
         st.caption("Generated pipeline interpretation, not independently validated investigation-agent findings.")
         brief = record.brief
         if not brief.content_mapped:
-            st.info("A brief record exists, but narrative, next-check and typology field names are unverified. "
-                    "Its content is not mapped; no raw AWS record is displayed.")
+            st.info("A brief record exists, but no supported explanation fields were stored. "
+                    "It may be older or incomplete; no raw AWS record is displayed.")
         else:
+            if brief.pipeline_status == "needs_review":
+                st.warning("Explainer status: needs_review — the pipeline stored a template fallback after validation retries.")
+            elif brief.pipeline_status is not None:
+                st.caption(f"Explainer status: {brief.pipeline_status}. Schema/numeric grounding checks do not prove the interpretation is correct.")
             if brief.narrative:
                 st.write(brief.narrative)
             else:
@@ -86,3 +99,9 @@ def render_realtime_record(record: RealtimeRecord) -> None:
                 st.text(f"Pipeline typology / interpretation: {brief.typology}")
             if brief.completed_at is not None:
                 st.text(f"Brief completion timestamp: {timestamp_text(brief.completed_at)}")
+            else:
+                st.caption("Brief completion timestamp is not stored in DynamoDB; no completion time or queue latency is inferred.")
+            if brief.model_version is not None:
+                st.text(f"Explainer model version: {brief.model_version}")
+            if brief.latency_ms is not None:
+                st.text(f"Reported explainer execution latency: {brief.latency_ms:g} ms")

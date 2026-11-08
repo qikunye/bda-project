@@ -51,13 +51,14 @@ def render_realtime() -> None:
         st.caption("Demo sessions are presentation groups, not verified pipeline session manifests.")
     else:
         st.info("LIVE DYNAMODB — Known transaction IDs only. Reads start on Load or Refresh, never on source selection.")
-        st.warning("Only txn keys and string alert amounts are documented in PLAN.md F21. Sort keys, indexes, "
-                   "timestamps and explanation-field mappings remain unverified.")
+        st.caption("Key and field mappings were checked against deployed table metadata, writer exports and "
+                   "bounded records. Both tables have txn-only string keys and no chronological indexes.")
     render_project_notices()
     with st.expander("Pipeline and integration scope", expanded=False):
         st.text("Kinesis → is459-rt-scorer → is459_rt_alerts → is459-rt-explainer → is459_rt_briefs → Streamlit")
         st.write("This monitor reads persisted records only. It does not report pipeline health or start/stop sessions. "
-                 "Automatic recent-alert listing is unavailable: no chronological index or bounded ID manifest was found. "
+                 "Automatic recent-alert listing is unavailable: the tables have no chronological index, "
+                 "and the exported session helper discovers alerts by scanning, which this UI does not use. "
                  "No table scan is used.")
 
     snapshot = st.session_state.get("ui_rt_snapshot")

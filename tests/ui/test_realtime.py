@@ -1,6 +1,8 @@
 """Real-time contract boundaries and manual-refresh UI, with no external services."""
 
+import json
 from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -76,7 +78,7 @@ def load(app, group=None):
 def test_minimal_live_mapping_uses_only_documented_attributes():
     resource = FakeRealtimeDynamo({
         (ALERTS_TABLE, "txn_a"): {"txn": "txn_a", "amount": "12.50", "risk_score": 0.99, "secret": "PRIVATE"},
-        (BRIEFS_TABLE, "txn_a"): {"txn": "txn_a", "narrative": "PRIVATE UNVERIFIED TEXT", "findings": []},
+        (BRIEFS_TABLE, "txn_a"): {"txn": "txn_a", "unverified_text": "PRIVATE UNVERIFIED TEXT", "findings": []},
     })
     record = RealtimeService(resource).lookup("txn_a")
     assert record.status == "available"
@@ -191,7 +193,7 @@ def test_live_selection_is_passive_and_reads_use_only_the_explicit_id_set():
     app.text_area(key="ui_rt_live_ids").set_value("txn_known, txn_missing")
     load(app)
     assert len(resource.calls) == 4
-    assert "field names are unverified" in text(app) and "PRIVATE" not in text(app)
+    assert "no supported explanation fields were stored" in text(app) and "PRIVATE" not in text(app)
     assert "Completed explanation" not in text(app)
     app.selectbox(key="ui_rt_selected_txn").set_value("txn_missing").run()
     assert "not a permanent missing-record conclusion" in text(app)
@@ -248,7 +250,7 @@ def test_demo_explanation_is_not_a_batch_agent_finding_and_optional_values_are_n
 
 def test_live_mapping_never_uses_demo_timestamps_or_unknown_model_attributes():
     resource = FakeRealtimeDynamo({(ALERTS_TABLE, "txn_known"): {
-        "txn": "txn_known", "timestamp": "2026-11-08T01:00:00Z", "score": 0.99, "rank": 1,
+        "txn": "txn_known", "timestamp": "2026-11-08T01:00:00Z", "risk_score": 0.99, "rank": 1,
     }})
     record = RealtimeService(resource).lookup("txn_known")
     assert record.alert.timestamp is None and record.alert.score is None
@@ -265,3 +267,80 @@ def test_demo_data_is_repeatable_and_unpaired_records_do_not_claim_an_arrival_or
         )
     app = load(monitor(), "Unpaired brief record")
     assert "Arrival order, retention and processing status cannot be inferred" in text(app)
+
+
+def synthetic_writer_items():
+    """Same field encodings as the observed writers/items; all values invented."""
+    txn = "txn_verifiedsynthetic"
+    return {
+        (ALERTS_TABLE, txn): {
+            "txn": txn, "txn_ts": "2022-09-14 10:00:00", "sender": "100|SYNTHETIC",
+            "receiver": "200|SYNTHETIC", "amount": "1234.50", "currency": "USD",
+            "payment_format": "ACH", "score": Decimal("0.65"), "threshold": Decimal("0.36"),
+            "model_version": "synthetic-scorer", "scored_at_ms": Decimal(1794099600000),
+            "arrival_ms": Decimal(1794099599000), "ingest_to_score_ms": Decimal(1000),
+        },
+        (BRIEFS_TABLE, txn): {
+            "txn": txn, "txn_ts": "2022-09-14 10:00:00", "score": Decimal("0.65"),
+            "narrative": "Synthetic explanation for reviewing the payment context.",
+            "next_checks": json.dumps(["Review the source account.", "Check the onward accounts."]),
+            "typology": "fan_out", "confidence": "low", "status": "ok",
+            "typology_hint": "fan_out", "model_version": "synthetic-explainer",
+            "latency_ms": Decimal(14500), "alert_scored_at_ms": Decimal(1794099600000),
+            "input": '{"risk_score":0.65}',
+        },
+    }
+
+
+def test_verified_dynamodb_decimal_and_json_string_encodings_are_mapped():
+    resource = FakeRealtimeDynamo(synthetic_writer_items())
+    record = RealtimeService(resource).lookup("txn_verifiedsynthetic")
+    assert record.status == "available" and record.alert.score == 0.65
+    assert record.alert.timestamp == "2022-09-14 10:00:00"
+    assert record.alert.sender == "100|SYNTHETIC" and record.alert.currency == "USD"
+    assert record.alert.model_version == "synthetic-scorer"
+    assert record.alert.scored_at.endswith("+00:00")
+    assert record.alert.ingest_to_score_ms == 1000
+    assert record.brief.next_checks == ("Review the source account.", "Check the onward accounts.")
+    assert record.brief.pipeline_status == "ok" and record.brief.model_version == "synthetic-explainer"
+    assert record.brief.latency_ms == 14500 and record.brief.completed_at is None
+    assert len(resource.calls) == 2
+
+
+def test_verified_real_time_explanation_renders_without_an_agent_or_extra_reads():
+    resource = FakeRealtimeDynamo(synthetic_writer_items())
+    app = monitor(LIVE_SOURCE, RealtimeService(resource))
+    app.text_area(key="ui_rt_live_ids").set_value("txn_verifiedsynthetic")
+    load(app)
+    assert "Synthetic explanation for reviewing" in text(app)
+    assert "- [ ] Review the source account." in text(app)
+    assert "Explainer status: ok" in text(app)
+    assert "not stored in DynamoDB" in text(app)
+    assert "Reported explainer execution latency: 14500 ms" in text(app)
+    app.run()
+    assert len(resource.calls) == 2 and not app.exception
+
+
+def test_needs_review_is_a_stored_template_brief_not_a_missing_brief():
+    items = synthetic_writer_items()
+    items[(BRIEFS_TABLE, "txn_verifiedsynthetic")]["status"] = "needs_review"
+    app = monitor(LIVE_SOURCE, RealtimeService(FakeRealtimeDynamo(items)))
+    app.text_area(key="ui_rt_live_ids").set_value("txn_verifiedsynthetic")
+    load(app)
+    assert "needs_review" in text(app) and "template fallback" in text(app)
+    assert "no brief was stored in this lookup" not in text(app)
+
+
+@pytest.mark.parametrize(("table", "key", "value"), [
+    (BRIEFS_TABLE, "next_checks", "not-json"),
+    (BRIEFS_TABLE, "next_checks", '{"not":"a list"}'),
+    (BRIEFS_TABLE, "next_checks", '[123]'),
+    (BRIEFS_TABLE, "status", "unrecognised"),
+    (ALERTS_TABLE, "score", True),
+    (ALERTS_TABLE, "score", Decimal("NaN")),
+    (ALERTS_TABLE, "scored_at_ms", Decimal("1e99")),
+])
+def test_malformed_verified_fields_are_incompatible(table, key, value):
+    items = synthetic_writer_items()
+    items[(table, "txn_verifiedsynthetic")][key] = value
+    assert RealtimeService(FakeRealtimeDynamo(items)).lookup("txn_verifiedsynthetic").status == "incompatible"

@@ -44,8 +44,10 @@ and are **not historical end-of-day batch replays**.
 ## Live batch reads
 
 Select **Live batch (read-only)** and explicitly choose **Load / refresh queue**.
-Selecting the source alone makes no AWS calls. This mode has been tested with
-fakes only; real AWS reads have not been exercised as part of this implementation.
+Selecting the source alone makes no AWS calls. Bounded AWS verification on
+8 November 2026 loaded five real queue rows, compatible decision metadata and one
+saved case/trace. See the [verification report](handovers/STREAMLIT_AWS_VERIFICATION.md)
+for query costs, sampled coverage and remaining browser/agent execution limits.
 
 The queue reuses `tools.load_day_queue` and `AgentData`, reads decision metadata
 by key, and fetches representatives outside the visible slice when necessary.
@@ -127,8 +129,8 @@ viewer.
 | Change evidence, case member, result view or expand trace | None |
 
 The legacy BQ2 submit action retains its original Athena behavior. No SQS reads,
-DynamoDB writes, ETL triggers or real-time pipeline execution have been added. Live access
-and inference have **not** been tested against AWS during this implementation.
+DynamoDB writes, ETL triggers or real-time pipeline execution have been added.
+Bounded live reads succeeded; live on-demand inference was deliberately not run.
 
 On-demand permissions additionally require Bedrock model invocation for the
 configured `AGENT_MODEL_ID` and the agent's label-free Athena/Glue/S3 access.
@@ -167,8 +169,9 @@ For live reads, choose **Live DynamoDB (read-only)**, enter known transaction ID
 (one per line or comma-separated, at most 20), and click **Load known alerts**.
 The service performs keyed reads of the alert and corresponding brief. It keeps
 input order and deduplicates IDs; this is **not a chronological recent feed**.
-There is no live session selector or automatic listing, because no index or
-bounded production ID manifest contract was available locally. No scan is used.
+There is no live session selector or automatic listing: deployed tables have no
+chronological index, and the exported session helper uses Scan rather than a
+bounded ID manifest. No scan is used by this UI.
 
 Selecting a source, choosing a loaded record, expanding details or navigating
 away and back performs no reads. The snapshot and selected record remain in the
@@ -180,58 +183,46 @@ record or declare a failed explanation from an absent brief alone.
 
 ### Real-time contract: evidence and explicit gaps
 
-Source: `PLAN.md`, section 16, **F21**; the pipeline names also appear in `README.md`.
-Searches of this repository, local GitHub project folders, BigData coursework,
-Downloads and Desktop did not find the Lambda writers, the ETL v2 handover,
-persisted record examples, a session runner or a session manifest. No AWS metadata
-was read during implementation.
+The deployed table metadata, exported writers under
+`s3://is459-aml-g1t5/rt/code/`, and two keyed alert/brief pairs were checked on
+8 November 2026. Source exports were read as text; no runner or writer was
+executed. See the [verification report](handovers/STREAMLIT_AWS_VERIFICATION.md)
+for the exact bounded operation counts and limitations.
 
-| Item | Documented or verified locally | Live adapter behavior |
+| Item | Verified contract | Live adapter behavior |
 |---|---|---|
-| Alert table | `is459_rt_alerts`, key named `txn` | `GetItem(Key={"txn": supplied_id})` |
-| Brief table | `is459_rt_briefs`, key named `txn` | Same requested ID, exact identity match required |
-| Alert `amount` | Documented as a string | Preserved as supplied; nullable/absent is unavailable |
-| Model reasons | F21 says none on real-time alerts | Not displayed |
-| Narrative, next checks, typology | Content concepts documented; exact attribute names unknown | Record existence shown, content mapping explicitly unavailable |
-| Partition/sort-key types and GSIs | Not independently verified | String `txn`-only request is the documented-key assumption; key validation errors are incompatible, never a scan fallback |
-| Alert/brief timestamps, score/rank, currencies, counterparties | Exact persisted field names/types/semantics unknown | Not guessed or mapped in live mode |
-| Processing status, failure markers, TTL and retention | Unknown | Missing briefs remain pending/unavailable; no permanent failure claim |
-| Session identity / recent-ID manifest | Not found locally | Explicit known-ID lookup only |
+| Alert / brief tables | `is459_rt_alerts` / `is459_rt_briefs`; txn HASH key, string; no sort key or indexes | Two exact GetItem reads per known ID, matching returned identities |
+| Alert amount | String | Preserved as supplied |
+| Alert txn_ts, sender, receiver, currency, payment_format | Strings | Dataset transaction time and payment context displayed |
+| Alert score | DynamoDB Number (SDK Decimal) | Numeric score; no invented rank or model reasons |
+| Alert model_version, scored_at_ms, arrival_ms, ingest_to_score_ms | Model string, numeric epoch milliseconds and latency | Collapsed scoring provenance; UTC epoch display separate from dataset time |
+| Brief narrative, typology | Strings | Pipeline interpretation, separate from batch-agent validated evidence |
+| Brief next_checks | String containing a JSON list of strings | Parsed and displayed as suggested checks |
+| Brief status | `ok` / `needs_review` | Source validation status / template fallback shown, without claiming interpretation correctness |
+| Brief model_version, latency_ms | String and DynamoDB Number | Model and reported explainer duration, not total queue latency |
+| Brief completion timestamp | DynamoDB writer omits S3-only written_at_ms | Unavailable; never inferred from scoring or lookup time |
+| Brief confidence / input | Source confidence enum and JSON input string | No calibrated confidence badge or raw input dump |
+| TTL | DISABLED on both tables | Absence does not establish processing failure or retention policy |
+| Session identity / chronological feed | No bounded ID source verified; exported helper scans | Known-ID lookup only |
 
-The isolated mappers `map_documented_alert` and `map_documented_brief` in
-`src/ui/services/realtime.py` deliberately map only documented names. Even a field
-that looks like `narrative` or `score` is not trusted as the real contract without
-the writer's schema. Raw DynamoDB records are never dumped into the page.
+The isolated mappers `map_documented_alert` and `map_documented_brief` accept
+verified fields, reject malformed known types and ignore unknown attributes.
+Raw DynamoDB records are never dumped into the page. `AlertSummary`, `Explanation`
+and `RealtimeRecord` remain UI presentation DTOs; demo values are invented and
+are separate from the live contract. Original agent fixtures are unchanged.
 
-`AlertSummary`, `Explanation` and `RealtimeRecord` are **UI presentation DTOs**,
-not asserted Lambda output schemas. Demo timestamps, sender/receiver, currency,
-score and explanation text are invented directly in those DTOs. They do not
-establish production field names. The original nine agent fixtures are unchanged.
-
-The live read service exposes `RealtimeService.lookup(txn)` and
-`lookup_many(known_ids)`. It creates a DynamoDB resource lazily only on explicit
-lookup. It makes at most two `GetItem` operations per supplied unique ID. No
-chronological query or pagination interface is claimed; there is no verified
-listing access pattern to paginate. Reads of the two tables are separate, not a
+The live service exposes `RealtimeService.lookup(txn)` and `lookup_many(known_ids)`.
+It creates a DynamoDB resource lazily only on explicit lookup. It makes at most
+two GetItem operations per unique ID. Reads of the two tables are separate, not a
 transactional snapshot. Errors remain distinct from missing records, and schema
-or identity mismatches are rejected.
+or identity mismatches are rejected. No chronological pagination is claimed.
 
-Before completing the content adapter or enabling a controlled live smoke test,
-obtain from the pipeline owner:
-
-- Redacted alert and brief items for the same `txn`, including optional/null,
-  delayed, failed or limited-content examples.
-- Table `KeySchema`/attribute types, any GSIs and their key schemas, and TTL
-  configuration. Confirm whether either table requires a sort key.
-- Scorer/explainer record-writing source and the meanings/formats of timestamps,
-  score, narrative, next checks, typology and status attributes.
-- The session-runner handover and any bounded manifest/recent-ID source. Otherwise
-  continue using explicit known IDs rather than adding a table scan.
-
-Live real-time lookup requires the normal credential chain and DynamoDB
-`GetItem` permission on both configured tables in the project region. This page
-needs no SQS, Kinesis, Lambda, Bedrock, Athena or write permissions. It makes no
-infrastructure changes and has not been tested against AWS during this milestone.
+Live lookup requires normal AWS credentials and DynamoDB GetItem permission on
+both tables in the configured region. This page needs no SQS, Kinesis, Lambda,
+Bedrock, Athena or write permissions. Two available pairs with source status `ok`
+were observed live. Pending, missing, malformed and fallback states are covered
+by synthetic regressions; they were not observed in that live sample. No pipeline
+health or completeness claim follows from two successful reads.
 
 ## Final laptop rehearsal
 
@@ -243,15 +234,15 @@ run the real-time sample-session walkthrough. All three journeys work offline;
 no recording is created by these checks.
 
 For a separately authorised live rehearsal, confirm credentials, action-specific
-permissions, current batch publications and the real-time schema prerequisites
-above. Obtain real-time transaction IDs from the pipeline owner. Loading records
+permissions and current batch publications. Obtain known real-time transaction
+IDs from the pipeline owner; the bounded verification sample is not a recent feed. Loading records
 does not start a stream and does not prove that a pipeline is currently healthy.
 Keep the offline sample data available as a clearly labelled fallback selected
 by the presenter, not an automatic substitution after a live error.
 
 The external `WORK_SPLIT.md` dated 6 November documents **`python3 session.py stop`**
-after every real-time session. The runner and its actual working directory are
-not present locally. If a session was started outside this dashboard, have the
+after every real-time session. The exported `session.py` confirms that command, but its actual working directory
+is not established locally. If a session was started outside this dashboard, have the
 pipeline owner run that documented command from the verified runner directory;
 do not guess a directory or run it from this repository. This dashboard neither
 starts nor stops sessions. No shutdown command was executed during implementation.
