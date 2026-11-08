@@ -55,7 +55,7 @@ def test_offline_demo_journeys_a_b_c():
     assert not app.exception
 
     # C: Offline session group, explanation, pending state and deliberate refresh.
-    app.radio(key="ui_navigation_page").set_value("Real-Time Alert Lookup").run()
+    app.radio(key="ui_navigation_page").set_value("Real-Time Monitoring").run()
     assert not app.dataframe
     _button(app, "Load known alerts").click().run()
     assert len(app.dataframe[0].value) == 3

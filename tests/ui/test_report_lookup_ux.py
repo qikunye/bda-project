@@ -192,10 +192,10 @@ def test_raised_service_failure_is_not_reported_as_successful_retrieval():
     assert app.session_state["ui_rt_snapshot"].retrieved_at is None
 
 
-def test_old_monitoring_navigation_state_migrates_to_lookup():
+def test_old_lookup_navigation_state_migrates_to_monitoring():
     app = AppTest.from_file(APP)
-    app.session_state["ui_navigation_page"] = "Real-Time Monitoring"
+    app.session_state["ui_navigation_page"] = "Real-Time Alert Lookup"
     app.run()
-    assert app.radio(key="ui_navigation_page").value == "Real-Time Alert Lookup"
-    assert app.title[0].value == "Real-Time Alert Lookup"
+    assert app.radio(key="ui_navigation_page").value == "Real-Time Monitoring"
+    assert app.title[0].value == "Real-Time Monitoring"
     assert not app.exception

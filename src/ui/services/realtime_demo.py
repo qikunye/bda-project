@@ -10,6 +10,7 @@ from src.ui.services.realtime import (
 
 DEMO_GROUPS = {
     "Sample session: mixed alerts": ["demo_rt_complete", "demo_rt_pending", "demo_rt_optional"],
+    "Fallback / needs review": ["demo_rt_fallback"],
     "Completed explanation": ["demo_rt_complete"],
     "Explanation pending": ["demo_rt_pending"],
     "Missing alert": ["demo_rt_missing"],
@@ -21,7 +22,7 @@ DEMO_GROUPS = {
     "Incompatible record": ["demo_rt_incompatible"],
     "All sample states": ["demo_rt_complete", "demo_rt_pending", "demo_rt_missing", "demo_rt_optional",
                           "demo_rt_alert_error", "demo_rt_brief_error", "demo_rt_limited",
-                          "demo_rt_unpaired", "demo_rt_incompatible"],
+                          "demo_rt_unpaired", "demo_rt_incompatible", "demo_rt_fallback"],
 }
 
 
@@ -36,13 +37,16 @@ def demo_records() -> dict[str, RealtimeRecord]:
                               f"demo-{side}-read", RuntimeError("Invented offline failure"))
     return {
         "demo_rt_complete": RealtimeRecord(
-            "demo_rt_complete", "available", alert("demo_rt_complete", score=0.73),
+            "demo_rt_complete", "available", alert("demo_rt_complete", score=0.73, threshold=0.5, scored_at="2026-11-08T01:01:00+00:00"),
             explanation("demo_rt_complete", narrative="Simulated explanation: review the payment in its account context.",
                         next_checks=("Review the sender's recent payments.", "Check the counterparty details."),
                         typology="Illustrative pass-through hypothesis",
-                        completed_at="2026-11-08T01:02:00+00:00"),
+                        completed_at="2026-11-08T01:02:00+00:00", pipeline_status="ok"),
         ),
-        "demo_rt_pending": RealtimeRecord("demo_rt_pending", "pending", alert("demo_rt_pending", score=0.61)),
+        "demo_rt_fallback": RealtimeRecord("demo_rt_fallback", "available", alert("demo_rt_fallback"),
+            explanation("demo_rt_fallback", narrative="Simulated template explanation for manual review.",
+                        pipeline_status="needs_review", next_checks=("Review the original payment.",))),
+        "demo_rt_pending": RealtimeRecord("demo_rt_pending", "pending", alert("demo_rt_pending", score=0.31, threshold=0.5)),
         "demo_rt_missing": RealtimeRecord("demo_rt_missing", "not_found"),
         "demo_rt_optional": RealtimeRecord("demo_rt_optional", "pending", AlertSummary("demo_rt_optional")),
         "demo_rt_alert_error": RealtimeRecord("demo_rt_alert_error", "alert_error", alert_failure=failure("alert")),

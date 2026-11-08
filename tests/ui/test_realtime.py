@@ -58,7 +58,7 @@ def button(app, label):
 
 def monitor(source=DEMO_SOURCE, service=None):
     app = AppTest.from_file(APP, default_timeout=10)
-    app.session_state["ui_navigation_page"] = "Real-Time Alert Lookup"
+    app.session_state["ui_navigation_page"] = "Real-Time Monitoring"
     app.session_state["ui_rt_source"] = source
     if service is not None:
         app.session_state["ui_rt_services"] = {source: service}
@@ -177,7 +177,7 @@ def test_demo_initial_load_and_selection_are_passive_until_manual_actions():
     app.run()
     backend.lookup_many.assert_called_once()
     app.radio(key="ui_navigation_page").set_value("Alert Queue").run()
-    app.radio(key="ui_navigation_page").set_value("Real-Time Alert Lookup").run()
+    app.radio(key="ui_navigation_page").set_value("Real-Time Monitoring").run()
     assert app.selectbox(key="ui_rt_selected_txn").value == "demo_rt_pending"
     backend.lookup_many.assert_called_once()
     button(app, "Refresh loaded alerts").click().run()
@@ -336,6 +336,7 @@ def test_needs_review_is_a_stored_template_brief_not_a_missing_brief():
     (BRIEFS_TABLE, "next_checks", '{"not":"a list"}'),
     (BRIEFS_TABLE, "next_checks", '[123]'),
     (BRIEFS_TABLE, "status", "unrecognised"),
+    (ALERTS_TABLE, "threshold", "0.5"),
     (ALERTS_TABLE, "score", True),
     (ALERTS_TABLE, "score", Decimal("NaN")),
     (ALERTS_TABLE, "scored_at_ms", Decimal("1e99")),

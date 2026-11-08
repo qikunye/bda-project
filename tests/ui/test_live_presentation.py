@@ -18,7 +18,7 @@ from src.ui.services.saved_results import DecisionBatch, SavedBrief
 from tests.ui.test_batch_dashboard import APP, content, dashboard, open_alert
 
 VERIFIED_ID = "txn_613ac569efe8fc2e024adfbeae71b746"
-PAGES = ["Alert Queue", "Investigation", "Real-Time Alert Lookup", "Agent Examples"]
+PAGES = ["Alert Queue", "Investigation", "Real-Time Monitoring", "Agent Examples"]
 
 
 def live_frame(score="0.9958", *, omit_score=False):
