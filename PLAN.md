@@ -161,7 +161,7 @@ S0 = BQ1 order with no brief. S1 = code-only brief. S2 = LLM brief.
 
 ## 9. LLM
 
-`AGENT_MODEL_ID` is Sonnet 4.5, `us.anthropic.claude-sonnet-4-5-20250929-v1:0` (D23). Backup: Nova 2 Lite, `us.amazon.nova-2-lite-v1:0`.
+`AGENT_MODEL_ID` is Sonnet 4.6, `us.anthropic.claude-sonnet-4-6` (D42; Sonnet 4.5 until 8 Nov, D23). Backup: Nova 2 Lite, `us.amazon.nova-2-lite-v1:0`.
 
 ## 10. Storage
 
@@ -285,6 +285,7 @@ The harness is `src/evaluation/` (the only code that reads labels; a test checks
 | D39 | *8 Nov.* Wording and naming: the money-flow field `onward_share` is now `quick_onward_share`, because it counts only payments within the pass-through gap; the `NO_GRAPH_AVAILABLE` text and prompt say "no payments into the sender or out of the receiver"; the prompt tells the model the exact next-check conditions and not to spell out numbers. |
 | D40 | *8 Nov.* The batch is triggered without a polling script: a second target `agent-batch` on the ETL's rule `is459-etl-v2-day-succeeded` (ETL owner agreed) starts the Step Functions state machine `is459-agent-batch`, which reads the day from `detail.input` and runs `scripts.run_batch --day <day> --spend-cap 20 --save` as a Fargate task. A failure sends an SNS email. Everything is in `infra/` (Dockerfile, task and state machine definitions, IAM policies, `deploy.sh`, `destroy.sh`), tagged `project=is459-g1t5-etl-v2`. The container's role can read only the label-free agent tables, so it cannot reach labels. The old target `agent-queue` (SQS `is459-etl-v2-day-ready`) is still on the rule and nothing reads it; remove the target and then the queue and its DLQ when convenient. |
 | D41 | *8 Nov, after the freeze, outside `src/`.* `scripts/run_batch.py` refuses `--save` when any case fell back because the LLM could not be used (a failed call such as a quota error, or the spend cap), unless `--allow-llm-failures` is passed. It changes no brief, finding or threshold. |
+| D42 | *8 Nov, agreed with the team.* The agent moves from Sonnet 4.5 to Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`, same list price) because Sonnet 4.5's daily token quota (27M, not adjustable) blocks running three days of evaluation (F39). No prompt, finding rule or threshold changes. A 10-alert dry run on 14 Sep: 9 valid, 1 repaired, 0 fallback, US$0.10 a case. `infra/iam/task-role-policy.json` now allows Sonnet 4.6; the deployed role and image still need `deploy.sh` (or the policy update alone, plus `--model` in the state machine) before the Fargate trigger can use it. The evaluation runs for 14 to 16 Sep were made from CloudShell with `--model us.anthropic.claude-sonnet-4-6`. |
 | D33 | One hop only. BQ2 is defined as one hop (6-72 h) and only that is evaluated, so the agent doesn't follow a counterparty's own payments. A second hop would be new analysis, not BQ2 output. |
 
 ## 18. Data access (built)
