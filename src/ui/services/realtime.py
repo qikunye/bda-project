@@ -45,6 +45,7 @@ class AlertSummary:
     scored_at: str | None = None
     arrival_at: str | None = None
     ingest_to_score_ms: float | None = None
+    threshold: float | None = None
 
 
 @dataclass(frozen=True)
@@ -125,7 +126,7 @@ def map_documented_alert(item: dict | None, txn: str) -> AlertSummary | None:
     return AlertSummary(
         txn, amount=_text(item, "amount"), timestamp=_text(item, "txn_ts"),
         sender=_text(item, "sender"), receiver=_text(item, "receiver"), currency=_text(item, "currency"),
-        score=_number(item, "score"), payment_format=_text(item, "payment_format"),
+        score=_number(item, "score"), threshold=_number(item, "threshold"), payment_format=_text(item, "payment_format"),
         model_version=_text(item, "model_version"), scored_at=_epoch_ms(item, "scored_at_ms"),
         arrival_at=_epoch_ms(item, "arrival_ms"), ingest_to_score_ms=_number(item, "ingest_to_score_ms"),
     )

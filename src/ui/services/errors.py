@@ -43,6 +43,9 @@ def describe_failure(error: Exception, operation: str) -> ServiceFailure:
     ):
         category = "Transient service failure"
         advice = "The service could not complete the request. Retry with a new explicit submission."
+    elif name == "realtimeschemaerror" or (code == "validationexception" and operation.startswith("Real-time")):
+        category = "Incompatible schema or query"
+        advice = "Verify record types, table keys and the configured index name/schema; no fallback discovery is attempted."
     elif name == "incompatibleresult":
         category = "Incompatible saved records"
         advice = "Current evidence-brief data is required; old or inconsistent records cannot be displayed."

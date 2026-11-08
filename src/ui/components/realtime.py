@@ -21,19 +21,44 @@ def timestamp_text(value: str | None) -> str:
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
+def threshold_status(record: RealtimeRecord) -> str:
+    alert = record.alert
+    if alert is None or alert.score is None or alert.threshold is None:
+        return "Threshold unavailable"
+    return "Meets scoring threshold" if alert.score >= alert.threshold else "Below scoring threshold"
+
+
+def explanation_status(record: RealtimeRecord) -> str:
+    if record.status == "available":
+        if record.brief and record.brief.pipeline_status == "needs_review":
+            return "Fallback / needs review"
+        if record.brief and record.brief.narrative:
+            return "Explanation available"
+        return "Data unavailable / limited explanation"
+    if record.status == "pending":
+        return "Explanation pending"
+    if record.status in {"alert_error", "brief_error"}:
+        return "AWS read failure"
+    return "Data unavailable"
+
+
 def monitoring_rows(records: list[RealtimeRecord]) -> list[dict]:
     return [{
         "Transaction ID": record.txn,
-        "Alert timestamp": timestamp_text(record.alert.timestamp if record.alert else None),
+        "Transaction timestamp": timestamp_text(record.alert.timestamp if record.alert else None),
+        "Processing timestamp": timestamp_text(record.alert.scored_at if record.alert else None),
+        "Sender": record.alert.sender if record.alert else None,
+        "Receiver": record.alert.receiver if record.alert else None,
         "Amount": record.alert.amount if record.alert and record.alert.amount is not None else UNAVAILABLE,
         "Currency": record.alert.currency if record.alert and record.alert.currency else UNAVAILABLE,
         "BQ1 ranking score": record.alert.score if record.alert else None,
-        "Explanation status": STATUS_LABELS[record.status],
+        "Threshold status": threshold_status(record),
+        "Explanation status": explanation_status(record),
     } for record in records]
 
 
-def render_realtime_record(record: RealtimeRecord) -> None:
-    st.subheader("Selected real-time alert")
+def render_realtime_record(record: RealtimeRecord, heading: str = "Selected real-time alert") -> None:
+    st.subheader(heading)
     st.code(record.txn, language=None)
     st.text(f"Explanation status: {STATUS_LABELS[record.status]}")
     for failure in (record.alert_failure, record.brief_failure):
@@ -66,6 +91,8 @@ def render_realtime_record(record: RealtimeRecord) -> None:
             st.text(f"Currency: {alert.currency or UNAVAILABLE}")
             if alert.payment_format:
                 st.text(f"Payment format: {alert.payment_format}")
+            if alert.threshold is not None:
+                st.text(f"Scoring threshold: {alert.threshold:g} · {threshold_status(record)}")
             st.caption("A BQ1 score supports ranking; it is not a calibrated laundering probability. "
                        "Amounts are not combined across currencies.")
             if any(value is not None for value in (alert.scored_at, alert.arrival_at, alert.model_version)):

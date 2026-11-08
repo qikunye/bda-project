@@ -11,7 +11,7 @@ The default Alert Queue uses **Demo (offline)**. No credentials or network servi
 PyVis is pinned in `requirements.txt`; graph JavaScript is loaded from that
 installed package and embedded inline, without CDN requests.
 
-Navigation: **Alert Queue → Investigation → Real-Time Alert Lookup → Agent Examples**. Batch and real-time sources have separate
+Navigation: **Alert Queue → Investigation → Real-Time Monitoring → Agent Examples**. Batch and real-time sources have separate
 selectors; their loaded records never substitute for one another. The collapsed
 **Data and interpretation limits** section summarises the project limitations.
 
@@ -197,46 +197,40 @@ exception type; the original exception is retained in the server-side failure
 object (`cause`) for debugger inspection, never rendered as JSON in the UI.
 After correcting access or connectivity, retry with a new explicit action.
 
-## Real-Time Alert Lookup journey
+## Real-Time Monitoring journey
 
-1. Select **Real-Time Alert Lookup**. Its source defaults to **Demo (offline)**.
-2. Leave **Sample session: mixed alerts** selected and click **Load known alerts**.
-   The session is a clearly invented presentation group containing three alerts,
-   not a claim that a production session manifest exists.
-3. Read `demo_rt_complete`, including its invented explanation, next checks and
-   typology. These are separate Lambda-style interpretations, not batch-agent
-   validated findings.
-4. Select `demo_rt_pending` to show an alert whose brief was not stored. Click
-   **Refresh loaded alerts** deliberately. Demo fixtures are static: refreshing
-   does not pretend that Kinesis or Lambda completed a run.
-5. Other sample sets cover missing optional fields, missing alerts, separate alert
-   and brief read failures, limited narrative, an incompatible record, and a brief
-   without its matching alert. The last example does not establish an actual
-   arrival order or TTL policy.
+1. Open **Real-Time Monitoring** and choose **Demo (offline)** or **Saved Replay Results**. Indexed recent alerts appear only when
+   `REALTIME_ALERTS_INDEX` is set to a deployed index name.
+2. For S3 discovery, choose **Transaction Date** **2022-09-16**, leave the
+   record count at **20** (maximum 50), and click **Load Results**.
+3. Review the table, apply local score/status filters and select a transaction
+   to see its Qwen narrative, typology and suggested checks. Missing scores and
+   thresholds are unavailable, never treated as zero or proof of suspicion.
+4. Click **Refresh** deliberately to retrieve again. Source/date/count changes
+   require another Load. Selection, filtering and detail expansion do not call AWS.
+5. Use **Advanced: Manual Transaction Lookup** for the preserved known-ID workflow:
+   independently choose Demo or Live DynamoDB, enter 1–20 IDs or a demo scenario,
+   and click **Load known alerts**. Its refresh uses the loaded ID set; invalid
+   input preserves its snapshot and selection.
 
-For live reads, choose **Live DynamoDB (read-only)**, enter known transaction IDs
-(one per line or comma-separated, at most 20), and click **Load known alerts**.
-Empty input shows “Enter at least one transaction ID from the real-time pipeline.”
-More than 20 IDs, oversized IDs and IDs containing spaces/control characters show
-local input guidance before service/client creation, with no debug reference or
-new retrieval timestamp. A compatible previously loaded snapshot, selected record
-and lookup time remain usable after invalid input. Refresh still uses the loaded
-ID set, not invalid text in the form. Batch queue IDs are not necessarily present
-in the separate real-time pipeline; no batch IDs are filled in automatically.
+| Source | Discovery and time meaning |
+|---|---|
+| Demo (offline) | Invented static records; no AWS; never a live result |
+| Live Recent Alerts (indexed DynamoDB) | Bounded GSI Query for one UTC processing day; descending processing time, separate from historical transaction time |
+| Saved Replay Results | Bounded key listing under a historical replay-date prefix; not chronological and not complete scoring coverage |
+| Manual Live DynamoDB lookup | Keyed reads in requested-ID order; no automatic discovery |
 
-The service performs keyed reads of the alert and corresponding brief. It keeps
-input order and deduplicates IDs; this is **not a chronological recent feed**.
-There is no live session selector or automatic listing: deployed tables have no
-chronological index, and the exported session helper uses Scan rather than a
-bounded ID manifest. No scan is used by this UI.
+All sources are explicit. A failure never silently substitutes another source.
+Both discovery modes reuse existing canonical alert/brief mapping via keyed
+lookups. Limits are three discovery pages and 50 IDs per action; the UI reports
+limited listings. S3 bodies are not downloaded. The retrieval timestamp is not
+transaction freshness or processing latency. The dashboard reads stored outputs;
+it does not monitor pipeline health or start BQ2/Claude investigation.
 
-Selecting a source, choosing a loaded record, expanding details or navigating
-away and back performs no reads. The snapshot and selected record remain in the
-session until explicit refresh or source change. **Refresh loaded alerts** reads
-the previously loaded ID set; changed form inputs require **Load known alerts**.
-The displayed lookup time is retrieval time, not event freshness or processing
-latency. The page does not report pipeline health, infer a permanently missing
-record or declare a failed explanation from an absent brief alone.
+See [real-time feed integration](handovers/REALTIME_FEED_INTEGRATION.md) for exact
+writer/index/IAM changes, service bounds, eventual consistency and replay limits.
+The writer and real-time infrastructure are outside this checkout. Nothing was
+deployed, backfilled or verified live for this enhancement.
 
 ### Real-time contract: evidence and explicit gaps
 
@@ -260,7 +254,7 @@ for the exact bounded operation counts and limitations.
 | Brief completion timestamp | DynamoDB writer omits S3-only written_at_ms | Unavailable; never inferred from scoring or lookup time |
 | Brief confidence / input | Source confidence enum and JSON input string | No calibrated confidence badge or raw input dump |
 | TTL | DISABLED on both tables | Absence does not establish processing failure or retention policy |
-| Session identity / chronological feed | No bounded ID source verified; exported helper scans | Known-ID lookup only |
+| Chronological feed | No deployed index in prior verification | Optional processing-day GSI interface; S3 key discovery is separately labelled |
 
 The isolated mappers `map_documented_alert` and `map_documented_brief` accept
 verified fields, reject malformed known types and ignore unknown attributes.
@@ -272,7 +266,7 @@ The live service exposes `RealtimeService.lookup(txn)` and `lookup_many(known_id
 It creates a DynamoDB resource lazily only on explicit lookup. It makes at most
 two GetItem operations per unique ID. Reads of the two tables are separate, not a
 transactional snapshot. Errors remain distinct from missing records, and schema
-or identity mismatches are rejected. No chronological pagination is claimed.
+or identity mismatches are rejected. Manual lookup makes no chronological claim; the separate feed adapter supports bounded GSI pagination.
 
 Live lookup requires normal AWS credentials and DynamoDB GetItem permission on
 both tables in the configured region. This page needs no SQS, Kinesis, Lambda,
@@ -371,7 +365,7 @@ findings remain unchanged.
 The isolated Chrome walkthrough also passed: four visible navigation options,
 Demo queue → native saved graph → queue, then a clearly labelled fake Live
 backend with 20 string-score rows, native row selection and the `0.9958` selected
-summary. Opening the mocked record, visiting Real-Time Alert Lookup and Agent
+summary. Opening the mocked record, visiting Real-Time Monitoring and Agent
 Examples caused no formatting exception or legacy UI fall-through. The harness
 performed no AWS/Bedrock operations; its temporary scripts remain outside Git at
 `/private/tmp/bda-queue-fix/`.
@@ -381,7 +375,7 @@ performed no AWS/Bedrock operations; its temporary scripts remain outside Git at
 The focused follow-up to `4130387` passed **836 unit/UI tests**, including 26 new
 cases for report availability, stale choices, independent evidence, local input
 validation, snapshot retention, classified read failures and old navigation state.
-**Real-Time Monitoring** session state safely migrates to **Real-Time Alert Lookup**.
+**Real-Time Alert Lookup** session state safely migrates to **Real-Time Monitoring**.
 The on-demand execution implementation, agent contracts, publication and storage
 remain unchanged. The existing 14 unrelated repository Ruff findings remain;
 touched-file Ruff, dependency and whitespace checks pass.
@@ -394,3 +388,17 @@ Both the full test run and browser guard recorded zero forbidden AWS/agent
 operations. Temporary browser harnesses/screenshots are outside Git under
 `/private/tmp/bda-report-lookup/`; no live verification or real investigation was
 repeated.
+
+## Saved replay terminology and live verification
+
+The source selector is **Data Source**. Choose **Saved Replay Results**, select
+**Transaction Date** (default **2022-09-16**) and click **Load Results**. The
+section is labelled **Replay Results**. The historical replay banner explains
+the data in plain language; S3, indexing and coverage details are in the collapsed
+**Technical Details** expander. The future indexed source retains its processing-day
+terminology and appears only when configured.
+
+[Live read verification](handovers/REALTIME_REPLAY_READ_VERIFICATION.md) confirmed
+two real transactions and their Qwen fields via SDK-backed Streamlit AppTest.
+Browser visuals were not verified. Offline tests and live observations are
+documented separately; the GSI/scorer integration remains external.
