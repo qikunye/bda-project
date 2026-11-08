@@ -12,7 +12,7 @@ done
 run aws ecs delete-cluster --cluster is459-agent
 run aws logs delete-log-group --log-group-name /ecs/is459-agent-batch
 run aws ecr delete-repository --repository-name is459-agent-batch --force
-for role in is459-agent-task-exec-role is459-agent-task-role is459-agent-sfn-role is459-agent-events-role; do
+for role in is459-agent-task-exec-role is459-agent-task-role is459-agent-rebuild-role is459-agent-sfn-role is459-agent-events-role; do
   for p in $(aws iam list-attached-role-policies --role-name "$role" --query 'AttachedPolicies[].PolicyArn' --output text); do
     run aws iam detach-role-policy --role-name "$role" --policy-arn "$p"
   done

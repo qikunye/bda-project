@@ -60,4 +60,4 @@ cases had a different number of observations).
 
 - Mark the observations by hand: `review_2022-09-1{4,5,6}.csv` in the S3 folder above, then rerun
   `run_evaluation --marked-csv`. Until then, whether observations are useful is not measured.
-- The deployed Fargate trigger still uses Sonnet 4.5 until the task role allows Sonnet 4.6 (D42).
+- The deployed Fargate trigger uses Sonnet 4.6 since 8 Nov (D42), and handles new days (D43).
