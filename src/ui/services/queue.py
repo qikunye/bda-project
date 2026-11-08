@@ -33,6 +33,8 @@ def enrich_queue(frame: pd.DataFrame, batch: DecisionBatch, day: str) -> list[di
     if frame.empty:
         return []
     label_free(frame.to_dict("records"))
+    if "risk_score" not in frame.columns:
+        frame = frame.assign(risk_score=None)
     frame = frame[QUEUE_COLUMNS].copy()
     frame["risk_rank_day"] = pd.to_numeric(frame["risk_rank_day"], errors="raise")
     if frame["transaction_id"].duplicated().any() or frame["risk_rank_day"].isna().any():

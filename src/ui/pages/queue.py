@@ -7,6 +7,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from src import config
 from src.aws.athena import AthenaQueryError
+from src.ui.components.formatting import format_number
 from src.ui.pages.batch import (
     BRIEF_LABELS,
     DEMO_SOURCE,
@@ -122,7 +123,7 @@ def render_queue() -> None:
         st.session_state["ui_batch_queue_alert"] = ids[0]
     display = [{
         "Daily rank": entry["risk_rank_day"], "Transaction ID": entry["txn_id"],
-        "Risk score": entry["risk_score"], "Transaction time (UTC)": entry["transaction_timestamp"],
+        "Risk score": format_number(entry.get("risk_score")), "Transaction time (UTC)": entry["transaction_timestamp"],
         "Brief status": BRIEF_LABELS[entry["status"]],
         "Finding count": str(entry["Finding count"]) if entry["Finding count"] is not None else "—",
     } for entry in snapshot.entries]
@@ -132,7 +133,7 @@ def render_queue() -> None:
     st.dataframe(display, hide_index=True, width="stretch", height="auto", key=table_key,
                  on_select=partial(select_queue_row, table_key, source, generation), selection_mode="single-row",
                  selection_default={"selection": {"rows": [ids.index(st.session_state["ui_batch_queue_alert"])]}},
-                 column_config={"Risk score": st.column_config.NumberColumn(format="%.4f"),
+                 column_config={"Risk score": st.column_config.TextColumn(help="BQ1 ranking signal, not a calibrated probability. Unavailable means no valid numeric score was supplied."),
                                 "Transaction ID": st.column_config.TextColumn(width=280),
                                 "Brief status": st.column_config.TextColumn(width=190),
                                 "Daily rank": st.column_config.NumberColumn(width=85),
@@ -141,13 +142,11 @@ def render_queue() -> None:
     with st.container(border=True):
         summary, action = st.columns([3, 2], vertical_alignment="center")
         summary.text(f"Selected transaction: {selected['txn_id']}")
-        summary.caption(f"Daily rank {selected['risk_rank_day']} · Risk score {selected['risk_score']:.4f} · "
+        summary.caption(f"Daily rank {selected['risk_rank_day']} · Risk score {format_number(selected.get('risk_score'))} · "
                         f"{BRIEF_LABELS[selected['status']]}")
         action.button("Open Selected Investigation", type="primary", on_click=open_investigation,
                       args=(source,), width="stretch")
-    with st.expander("Keyboard selection / alert details", expanded=False):
-        st.selectbox("Selected alert", ids, key="ui_batch_queue_alert",
-                     format_func=lambda txn: f"Rank {display[ids.index(txn)]['Daily rank']} · {txn}")
+    with st.expander("Selected alert details", expanded=False):
         entry = snapshot.entries[ids.index(st.session_state["ui_batch_queue_alert"])]
         st.text(f"Sender: {entry['source_account_key']} → Receiver: {entry['target_account_key']}")
         st.text(f"Case ID: {entry.get('case_id') or 'Not supplied'} · Role: {entry.get('role') or 'Not supplied'}")

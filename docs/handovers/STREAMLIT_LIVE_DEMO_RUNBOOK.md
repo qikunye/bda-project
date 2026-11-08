@@ -139,9 +139,10 @@ already been consumed; another requires new approval.
 5. **Agent Examples** offers nine additional sample scenarios for
    missing data, repaired briefs and fallback if questions arise.
 
-Offline mode requires no credentials, Bedrock, CDN or AWS pipeline. Avoid the
-**Legacy BQ2** page for the offline fallback: its original query
-submission uses Athena.
+Offline mode requires no credentials, Bedrock, CDN or AWS pipeline. Navigation
+contains exactly Alert Queue, Investigation, Real-Time Monitoring and Agent
+Examples. The legacy BQ2 page is no longer exposed; the native Investigation
+graph remains available.
 
 ## Charges and execution boundaries
 
@@ -153,7 +154,6 @@ submission uses Athena.
 | Inspect already loaded findings, click evidence, change members/views/pages, expand trace | Session-local display; no additional AWS calls observed or required by these paths |
 | Load/refresh known Live real-time IDs | Up to two DynamoDB GetItem reads per unique ID; no Bedrock, Kinesis or Lambda invocation |
 | Live Run Agent Investigation / Run again | New Athena and Bedrock work; excluded from this presentation without new approval |
-| Submit Legacy BQ2 lookup | Existing Athena query path and associated scan/result costs |
 
 Saved evidence is read from the published case/trace and rendered locally. Its
 citations resolve against that loaded result, which is why inspection does not

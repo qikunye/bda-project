@@ -57,20 +57,26 @@ PAGE_LABELS = {
     "Alert Queue": "Alert Queue",
     "Investigation": "Investigation",
     "Real-Time Monitoring": "Real-Time Monitoring",
-    "Agent Evidence Brief (Demo)": "Agent Examples",
-    "BQ2 Money Trail (Legacy)": "Legacy BQ2",
+    "Agent Examples": "Agent Examples",
 }
 PAGE_GUIDANCE = {
     "Alert Queue": "Find transactions to review.",
     "Investigation": "Explore money flow and supporting evidence.",
     "Real-Time Monitoring": "Check stored incoming alerts and their Lambda explanations.",
-    "Agent Evidence Brief (Demo)": "Explore offline examples of investigation patterns.",
-    "BQ2 Money Trail (Legacy)": "Inspect the original network exploration tool.",
+    "Agent Examples": "Explore offline examples of investigation patterns.",
 }
+
+# Migrate old example bookmarks and reject removed/unknown navigation values before
+# instantiating the keyed widget. The legacy root UI below is never routed to.
+previous_page = st.session_state.get("ui_navigation_page", "Alert Queue")
+if previous_page == "Agent Evidence Brief (Demo)":
+    st.session_state["ui_navigation_page"] = "Agent Examples"
+elif previous_page not in PAGE_LABELS:
+    st.session_state["ui_navigation_page"] = "Alert Queue"
 
 page = st.sidebar.radio(
     "Application",
-    ["Alert Queue", "Investigation", "Real-Time Monitoring", "Agent Evidence Brief (Demo)", "BQ2 Money Trail (Legacy)"],
+    list(PAGE_LABELS),
     key="ui_navigation_page",
     format_func=PAGE_LABELS.get,
 )
@@ -97,12 +103,15 @@ if page == "Real-Time Monitoring":
     render_realtime()
     st.stop()
 
-if page == "Agent Evidence Brief (Demo)":
+if page == "Agent Examples":
     from src.ui.pages.agent_demo import render_agent_demo
 
     render_agent_demo()
     st.stop()
 
+
+# Fail closed: no supported page can fall through into the retained legacy UI.
+st.stop()
 
 # ============================================================
 # AWS CLIENT

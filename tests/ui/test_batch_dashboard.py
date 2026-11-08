@@ -30,8 +30,13 @@ def dashboard(backend=None, source=DEMO_SOURCE):
     return app
 
 
+def select_alert(app, txn_id):
+    app.session_state["ui_batch_queue_alert"] = txn_id
+    return app.run()
+
+
 def open_alert(app, txn_id):
-    app.selectbox(key="ui_batch_queue_alert").set_value(txn_id)
+    select_alert(app, txn_id)
     next(button for button in app.button if button.label == "Open Selected Investigation").click().run()
     assert not app.exception
     assert app.radio(key="ui_navigation_page").value == "Investigation"
@@ -171,21 +176,21 @@ def test_saved_read_failures_and_incompatible_records_are_visible(status):
     assert status_label in set(app.dataframe[0].value["Brief status"])
 
 
-def test_live_source_is_retained_across_legacy_navigation():
+def test_live_source_is_retained_across_examples_navigation():
     app = dashboard(source=LIVE_SOURCE)
-    app.radio(key="ui_navigation_page").set_value("BQ2 Money Trail (Legacy)").run()
+    app.radio(key="ui_navigation_page").set_value("Agent Examples").run()
     app.radio(key="ui_navigation_page").set_value("Alert Queue").run()
     assert app.radio(key="ui_batch_source").value == LIVE_SOURCE
     assert not app.dataframe
     assert "DEMO DATA" not in content(app)
 
 
-def test_navigation_keeps_legacy_investigation_state_untouched():
+def test_navigation_keeps_unrelated_investigation_state_untouched():
     app = dashboard()
     sentinel = {"transaction_id": "legacy-sentinel"}
     app.session_state["investigation"] = deepcopy(sentinel)
     open_alert(app, "txn_samplepass")
-    app.radio(key="ui_navigation_page").set_value("BQ2 Money Trail (Legacy)").run()
-    assert app.title[0].value == "AML Transaction Network"
+    app.radio(key="ui_navigation_page").set_value("Agent Examples").run()
+    assert app.title[0].value == "Agent Evidence Brief"
     assert app.session_state["investigation"] == sentinel
     assert not app.exception

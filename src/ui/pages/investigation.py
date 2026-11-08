@@ -15,6 +15,7 @@ from src.ui.components.agent_brief import (
 )
 from src.ui.components.agent_graph import render_agent_graph
 from src.ui.components.evidence import render_evidence_buttons, render_selected_evidence
+from src.ui.components.formatting import format_number
 from src.ui.pages.batch import BRIEF_LABELS, DEMO_SOURCE, batch_source, navigate
 from src.ui.pages.on_demand import render_on_demand
 
@@ -87,7 +88,7 @@ def render_investigation() -> None:
             st.info("No batch result is stored for this alert. On-demand execution requires an explicit submission.")
         entry = selection["entry"]
         st.text(f"{entry['source_account_key']} → {entry['target_account_key']}")
-        st.caption(f"Daily rank {entry['risk_rank_day']} · Risk score {entry['risk_score']:.4f} · "
+        st.caption(f"Daily rank {entry['risk_rank_day']} · Risk score {format_number(entry.get('risk_score'))} · "
                    f"Time: {entry['transaction_timestamp']} UTC")
     result_area = st.container()
     with st.expander("Advanced: Run a new AI investigation", expanded=False):

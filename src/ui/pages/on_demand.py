@@ -7,6 +7,7 @@ from hashlib import sha256
 import streamlit as st
 
 from src.agent.contracts import InvestigateResult
+from src.ui.components.formatting import format_number
 from src.ui.pages.batch import DEMO_SOURCE
 from src.ui.services.contracts import check_shape, label_free, require
 from src.ui.services.errors import ServiceFailure, describe_failure
@@ -29,7 +30,7 @@ def render_on_demand(selection: dict, source: str) -> tuple[Attempt | None, str]
     entry = selection["entry"]
     st.text(f"Request alert: {txn_id} · Date: {day} · Source: {source}")
     st.caption(f"BQ1 daily rank: {entry.get('risk_rank_day', 'Unavailable')} · "
-               f"BQ1 ranking score: {entry.get('risk_score', 'Unavailable')}")
+               f"BQ1 ranking score: {format_number(entry.get('risk_score'))}")
     target = (source, txn_id, day)
     windows = st.session_state.setdefault("ui_on_demand_windows", {})
     target_id = sha256(repr(target).encode()).hexdigest()[:16]

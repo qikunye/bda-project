@@ -7,6 +7,7 @@ from streamlit.testing.v1 import AppTest
 
 from src.ui.pages.batch import DEMO_SOURCE
 from src.ui.services.on_demand import DemoOnDemandService
+from tests.ui.test_batch_dashboard import select_alert
 
 APP = Path(__file__).resolve().parents[2] / "app.py"
 
@@ -25,7 +26,7 @@ def test_offline_demo_journeys_a_b_c():
     app = AppTest.from_file(APP, default_timeout=10).run()
     ranks = app.dataframe[0].value["Daily rank"].tolist()
     assert ranks == sorted(ranks)
-    app.selectbox(key="ui_batch_queue_alert").set_value("txn_samplefanmember")
+    select_alert(app, "txn_samplefanmember")
     _button(app, "Open Selected Investigation").click().run()
     assert app.get("iframe") and app.selectbox(key="ui_batch_member").value == "txn_samplefanmember"
     _button(app, "txn_samplefanup").click().run()
@@ -38,7 +39,7 @@ def test_offline_demo_journeys_a_b_c():
 
     # B: Explicit simulation, independent views and no repeated execution on reruns.
     _button(app, "Back to Alert Queue").click().run()
-    app.selectbox(key="ui_batch_queue_alert").set_value("txn_samplepass")
+    select_alert(app, "txn_samplepass")
     _button(app, "Open Selected Investigation").click().run()
     runner = Mock(wraps=DemoOnDemandService())
     app.session_state["ui_on_demand_services"] = {DEMO_SOURCE: runner}

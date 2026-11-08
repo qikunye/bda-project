@@ -13,7 +13,7 @@ from src.ui.pages import agent_demo
 
 APP = Path(__file__).resolve().parents[2] / "app.py"
 LEGACY = "BQ2 Money Trail (Legacy)"
-DEMO = "Agent Evidence Brief (Demo)"
+DEMO = "Agent Examples"
 SAMPLES = sample_investigations()
 
 
@@ -50,7 +50,9 @@ def test_every_scenario_renders_supplied_content_without_aws(scenario):
     assert "No AWS services or Bedrock models are called." in content
     assert "Full analysis days end on 16 Sep 2022." in content
     assert app.selectbox(key="agent_demo_scenario").options == list(agent_demo.SCENARIO_LABELS.values())
-    assert "Legacy BQ2" in app.radio(key="ui_navigation_page").options
+    assert app.radio(key="ui_navigation_page").options == [
+        "Alert Queue", "Investigation", "Real-Time Monitoring", "Agent Examples",
+    ]
     assert "investigation" not in app.session_state
     assert not app.button  # No action can accidentally execute the agent.
     for forbidden_label in ("verdict", "confidence", "model reasons"):
@@ -198,26 +200,15 @@ def test_missing_money_flow_is_not_displayed_as_zero(monkeypatch):
     assert "Upstream transactions" not in [item.label for item in app.metric]
 
 
-def test_legacy_initial_controls_and_navigation_remain_available():
+def test_removed_legacy_navigation_resolves_to_queue_without_running_legacy_ui():
     app = AppTest.from_file(str(APP), default_timeout=10)
     app.session_state["ui_navigation_page"] = LEGACY
     app.run()
     assert not app.exception
-    assert app.radio(key="ui_navigation_page").value == LEGACY
-    assert app.title[0].value == "AML Transaction Network"
-    assert app.text_input(key="handoff_transaction_id").value == "txn_630dea1dda9482dbd765a966355d6708"
-    assert [item.value for item in app.text_input][1:] == [
-        "120075|81294D7A0", "15126|8127C1990", "2022-09-03 12:27:00",
-    ]
-    assert app.slider[0].value == 48
-    assert app.button[0].label == "Run investigation"
+    assert app.radio(key="ui_navigation_page").value == "Alert Queue"
+    assert app.title[0].value == "AML Alert Review"
+    assert not app.text_input
     assert "investigation" not in app.session_state
     app.radio(key="ui_navigation_page").set_value(DEMO).run()
     assert not app.exception
     assert not app.text_input and not app.button
-    app.radio(key="ui_navigation_page").set_value(LEGACY).run()
-    assert not app.exception
-    app.radio[1].set_value("Transaction ID lookup").run()
-    assert len(app.text_input) == 1
-    assert app.text_input[0].value == "txn_630dea1dda9482dbd765a966355d6708"
-    assert "investigation" not in app.session_state

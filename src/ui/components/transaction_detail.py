@@ -4,13 +4,15 @@ from datetime import datetime
 
 import streamlit as st
 
+from src.ui.components.formatting import format_number, numeric_value
+
 UNAVAILABLE = "Not supplied"
 
 
 def amount_text(amount, currency) -> str:
-    if amount is None:
+    if numeric_value(amount) is None:
         return "Amount not supplied"
-    formatted = f"{amount:,.2f}" if isinstance(amount, (int, float)) else str(amount)
+    formatted = format_number(amount, digits=2, grouping=True)
     formatted = formatted.removesuffix(".00")
     return f"US${formatted}" if currency in {"US Dollar", "USD"} else f"{formatted} {currency or '(currency not supplied)'}"
 
@@ -34,12 +36,12 @@ def render_transaction_details(fields: dict, *, title: str = "Selected supportin
         st.text(f"Currency: {fields.get('currency') or UNAVAILABLE}")
         st.text(f"Time: {time_text(fields.get('ts'))}")
         st.text(f"Type: {fields.get('role') or UNAVAILABLE}")
-        offset = fields.get("offset_minutes")
+        offset = numeric_value(fields.get("offset_minutes"))
         if offset is None:
             st.caption("Time relative to flagged transaction: not supplied")
         elif offset == 0:
             st.text("Time relative to flagged transaction: 0 minutes (same time)")
         else:
-            st.text(f"Time {'before' if offset < 0 else 'after'} flagged transaction: {abs(offset):g} minutes")
+            st.text(f"Time {'before' if offset < 0 else 'after'} flagged transaction: {format(abs(offset).normalize(), 'f')} minutes")
         if fields.get("payment_format"):
             st.text(f"Payment format: {fields['payment_format']}")

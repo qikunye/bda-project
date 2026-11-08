@@ -11,8 +11,7 @@ The default Alert Queue uses **Demo (offline)**. No credentials or network servi
 PyVis is pinned in `requirements.txt`; graph JavaScript is loaded from that
 installed package and embedded inline, without CDN requests.
 
-Navigation: **Alert Queue → Investigation → Real-Time Monitoring → Agent Evidence
-Brief (Demo) → Legacy BQ2**. Batch and real-time sources have separate
+Navigation: **Alert Queue → Investigation → Real-Time Monitoring → Agent Examples**. Batch and real-time sources have separate
 selectors; their loaded records never substitute for one another. The collapsed
 **Data and interpretation limits** section summarises the project limitations.
 
@@ -23,8 +22,9 @@ selection is in the sidebar; date, review limit and refresh are together above
 six columns: daily rank, transaction ID, risk score, transaction time, brief
 status and finding count. New sessions start with 20 alerts, enough to include
 all nine current 14 September Demo examples. The configured backend maximum is
-unchanged. Select a table row and choose **Open Selected Investigation**; a
-collapsed keyboard alternative and secondary alert details remain available.
+unchanged. Select a table row and choose **Open Selected Investigation**. The
+selected-alert detail panel retains secondary fields; no second transaction
+dropdown is required.
 The table always preserves the supplied BQ1 order.
 
 Every loaded queue has a new table generation. Selection is validated before
@@ -63,8 +63,9 @@ for the guarded offline browser rehearsal and regression coverage.
    15 September, so its demo queue is empty.
 
 The existing Agent Examples screen retains all nine original
-scenarios, including not-found, code-only and repaired. Legacy BQ2 remains in the
-same application. The real-time page reads persisted records only; no pipeline
+scenarios, including not-found, code-only and repaired. Legacy BQ2 is removed from
+application navigation; its original root UI is retained behind an unconditional
+stop, and the shared BQ2 backend and native investigation graph remain intact. The real-time page reads persisted records only; no pipeline
 control is integrated.
 
 The demo persistence adapter wraps copies of the existing fixtures. The
@@ -163,7 +164,7 @@ viewer.
 | Click approved Live Run / Run again | Existing Athena/Bedrock investigation agent |
 | Change evidence, case member, result view or expand trace | None |
 
-The legacy BQ2 submit action retains its original Athena behavior. No SQS reads,
+The legacy BQ2 submit action is inaccessible from this application. No SQS reads,
 DynamoDB writes, ETL triggers or real-time pipeline execution have been added.
 Bounded live reads and exactly one separately approved live on-demand investigation
 succeeded. That approval is consumed; do not execute another investigation for a
@@ -319,3 +320,41 @@ runner's result unchanged. Streamlit tests inject these through session-scoped
 `ui_batch_backends` and `ui_on_demand_services` maps. Passive navigation, separate
 cost acknowledgement, exact call counts, request identity, independent evidence
 views and safe error rendering are all tested without AWS.
+
+## Live score and navigation reliability fix
+
+Athena queue records may contain string risk scores. The shared presentation
+formatter accepts finite numeric strings, floats, integers and Decimals, and
+renders scores to four decimals. Missing/null/blank/malformed/non-finite scores
+show **Unavailable**, never an invented zero. The queue table, selected summary,
+missing-saved investigation and advanced request caption use this formatter.
+Raw source scores, IDs, BQ1 ordering and SQL remain unchanged. An entirely absent
+score column is handled as unavailable while other required queue fields retain
+their existing validation. Saved metric/amount presentation uses the same safe
+numeric handling. Real-time DynamoDB fields remain validated by their mapper.
+
+The four navigation values are now the four displayed names. Old Agent Evidence
+Brief (Demo) session state migrates to Agent Examples; obsolete Legacy BQ2 or
+unknown values resolve to Alert Queue before the keyed radio renders. Every
+supported page stops explicitly, with a final unconditional stop guarding the
+retained legacy root code. No native graph or `src/bq2/` module was removed.
+Row selection and snapshot-generation guards remain; the optional separate queue
+dropdown was removed.
+
+Offline verification: **810 unit/UI tests passed** (773 previous plus 37 focused
+score/navigation cases). New coverage includes the actual string-score failure,
+Decimal and unavailable values, an injected 20-row Live queue, selecting the
+previously verified ID from mocked data, missing-saved rendering, four routes and
+obsolete navigation migration. Source records are checked for mutation. Existing
+stale-selection and graph/evidence coverage remains in place. Tests blocked all
+real AWS/agent operations and recorded zero forbidden attempts. Touched-file
+Ruff, dependency and whitespace checks passed; 14 unrelated repository Ruff
+findings remain unchanged.
+
+The isolated Chrome walkthrough also passed: four visible navigation options,
+Demo queue → native saved graph → queue, then a clearly labelled fake Live
+backend with 20 string-score rows, native row selection and the `0.9958` selected
+summary. Opening the mocked record, visiting Real-Time Monitoring and Agent
+Examples caused no formatting exception or legacy UI fall-through. The harness
+performed no AWS/Bedrock operations; its temporary scripts remain outside Git at
+`/private/tmp/bda-queue-fix/`.

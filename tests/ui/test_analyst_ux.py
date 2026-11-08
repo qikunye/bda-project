@@ -12,7 +12,13 @@ from src.ui.components.evidence import evidence_fields, resolve_evidence
 from src.ui.pages.batch import DEMO_SOURCE, LIVE_SOURCE
 from src.ui.pages.queue import STALE_ALERT, open_investigation, select_queue_row
 from src.ui.services.demo import DemoBatchService
-from tests.ui.test_batch_dashboard import APP, content, dashboard, open_alert
+from tests.ui.test_batch_dashboard import (
+    APP,
+    content,
+    dashboard,
+    open_alert,
+    select_alert,
+)
 
 
 def button(app, label):
@@ -35,11 +41,11 @@ def load(app, day=None, top_k=None):
 ])
 def test_date_change_replaces_selection_before_widgets(first, selected, second):
     app = load(dashboard(), first)
-    app.selectbox(key="ui_batch_queue_alert").set_value(selected).run()
+    select_alert(app, selected)
     load(app, second)
     active_ids = app.dataframe[0].value["Transaction ID"].tolist()
     assert selected not in active_ids
-    assert app.selectbox(key="ui_batch_queue_alert").value in active_ids
+    assert app.session_state["ui_batch_queue_alert"] in active_ids
     button(app, "Open Selected Investigation").click().run()
     assert not app.exception
     assert app.session_state["ui_batch_selection"]["txn_id"] in active_ids
@@ -47,10 +53,10 @@ def test_date_change_replaces_selection_before_widgets(first, selected, second):
 
 def test_top_k_removal_and_reload_replace_row_selection():
     app = dashboard()
-    app.selectbox(key="ui_batch_queue_alert").set_value("txn_demounprocessed").run()
+    select_alert(app, "txn_demounprocessed")
     generation = app.session_state["ui_batch_generation"]
     load(app, top_k=1)
-    assert app.selectbox(key="ui_batch_queue_alert").value == app.dataframe[0].value.iloc[0]["Transaction ID"]
+    assert app.session_state["ui_batch_queue_alert"] == app.dataframe[0].value.iloc[0]["Transaction ID"]
     assert app.session_state["ui_batch_generation"] == generation + 1
     load(app)
     assert app.session_state["ui_batch_generation"] == generation + 2
@@ -63,7 +69,7 @@ def test_source_change_clears_demo_selection_and_live_defaults_to_twenty():
     live = Mock(wraps=DemoBatchService())
     app = dashboard(demo)
     app.session_state["ui_batch_backends"] = {DEMO_SOURCE: demo, LIVE_SOURCE: live}
-    app.selectbox(key="ui_batch_queue_alert").set_value("txn_demounprocessed").run()
+    select_alert(app, "txn_demounprocessed")
     app.radio(key="ui_batch_source").set_value(LIVE_SOURCE).run()
     assert not app.dataframe
     assert not [widget for widget in app.selectbox if widget.key == "ui_batch_queue_alert"]
@@ -104,7 +110,7 @@ def test_stale_selection_notice_is_visible_and_queue_is_retained():
     app.run()
     assert STALE_ALERT in content(app)
     assert app.dataframe[0].value["Transaction ID"].tolist() == [entry["txn_id"] for entry in snapshot.entries]
-    assert app.selectbox(key="ui_batch_queue_alert").value in [entry["txn_id"] for entry in snapshot.entries]
+    assert app.session_state["ui_batch_queue_alert"] in [entry["txn_id"] for entry in snapshot.entries]
     assert not app.exception
 
 

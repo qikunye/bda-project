@@ -5,6 +5,7 @@ from collections.abc import Callable
 import streamlit as st
 
 from src.agent.contracts import Alert, InvestigateResult, MemberMoneyFlow
+from src.ui.components.formatting import format_number, numeric_value
 
 UNAVAILABLE = "Unavailable / not applicable"
 
@@ -19,7 +20,9 @@ FINDING_TITLES = {
 
 
 def _number(value: float | None, *, suffix: str = "", digits: int = 2) -> str:
-    return UNAVAILABLE if value is None else f"{value:,.{digits}f}{suffix}"
+    if numeric_value(value) is None:
+        return UNAVAILABLE
+    return format_number(value, digits=digits, grouping=True) + suffix
 
 
 def money_flow_rows(flow: MemberMoneyFlow) -> list[dict[str, str]]:
@@ -56,7 +59,7 @@ def render_selected_alert(alert: Alert, window_h: int) -> None:
             st.caption(f"Timestamp (UTC): {alert.get('ts') or UNAVAILABLE}")
             st.caption(f"Currency: {alert.get('currency') or UNAVAILABLE} · "
                        f"Payment format: {alert.get('payment_format') or UNAVAILABLE} · Window: ±{window_h} hours")
-        score.metric("BQ1 risk score · ranking signal", _number(alert.get("risk_score"), digits=4))
+        score.metric("BQ1 risk score · ranking signal", format_number(alert.get("risk_score")))
         rank.metric("BQ1 daily rank", _number(alert.get("risk_rank_day"), digits=0))
         st.caption("The BQ1 score is a ranking signal, not a laundering probability.")
 
