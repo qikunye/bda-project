@@ -30,10 +30,43 @@
             {"Variable": "$.parsed.day", "IsPresent": true},
             {"Variable": "$.parsed.day", "StringMatches": "20*-*-*"}
           ],
-          "Next": "RunBatch"
+          "Next": "RebuildTables"
         }
       ],
       "Default": "NotifyBadInput"
+    },
+    "RebuildTables": {
+      "Comment": "Widens the agent tables to the new day (D43). Runs under is459-agent-rebuild-role, which can read Gold; the batch below cannot. Does nothing if the tables already hold the day.",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "TimeoutSeconds": 1800,
+      "Parameters": {
+        "Cluster": "arn:aws:ecs:us-east-1:__ACCOUNT_ID__:cluster/is459-agent",
+        "TaskDefinition": "is459-agent-batch",
+        "LaunchType": "FARGATE",
+        "PlatformVersion": "LATEST",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": __SUBNETS__,
+            "SecurityGroups": __SECURITY_GROUPS__,
+            "AssignPublicIp": "ENABLED"
+          }
+        },
+        "Overrides": {
+          "TaskRoleArn": "arn:aws:iam::__ACCOUNT_ID__:role/is459-agent-rebuild-role",
+          "ContainerOverrides": [
+            {
+              "Name": "batch",
+              "Environment": [{"Name": "AGENT_LAST_DAY", "Value.$": "$.parsed.day"}],
+              "Command": ["python", "-m", "scripts.rebuild_tables", "--yes"]
+            }
+          ]
+        },
+        "PropagateTags": "TASK_DEFINITION"
+      },
+      "ResultPath": "$.rebuild",
+      "Catch": [{"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyFailure"}],
+      "Next": "RunBatch"
     },
     "RunBatch": {
       "Type": "Task",
@@ -55,6 +88,7 @@
           "ContainerOverrides": [
             {
               "Name": "batch",
+              "Environment": [{"Name": "AGENT_LAST_DAY", "Value.$": "$.parsed.day"}],
               "Command.$": "States.Array('python', '-m', 'scripts.run_batch', '--day', $.parsed.day, '--spend-cap', '20', '--save')"
             }
           ]

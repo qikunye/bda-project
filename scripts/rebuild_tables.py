@@ -118,6 +118,19 @@ def rebuild(*, execute, query, list_keys, delete_keys, log=print) -> list[str]:
         log("No existing scores table to fingerprint.")
     log(f"Fingerprinted {len(before)} existing day(s).")
 
+    # The new-day path calls this for every ETL day. A day the tables already hold needs nothing, and
+    # a rebuild that would drop a later day is refused, so a replayed old day never shrinks them.
+    wanted = set(config.AGENT_SCORED_DATES)
+    if before and wanted <= set(before):
+        log("The tables already hold every scored day; nothing rebuilt.")
+        return []
+    later = sorted(d for d in before if d not in wanted)
+    if later:
+        raise RuntimeError(
+            f"The tables hold {later}, after AGENT_LAST_DAY {config.AGENT_LAST_SCORED_DAY}. "
+            "Refusing to drop them; set AGENT_LAST_DAY to the latest day."
+        )
+
     for name, _ in reversed(plan):
         execute(f"DROP TABLE IF EXISTS is459_aml_gold.{name}")
         keys = list_keys(table_prefix(name))

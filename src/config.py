@@ -1,5 +1,8 @@
 """Shared settings for the investigation agent."""
 
+import os
+from datetime import date, timedelta
+
 AWS_REGION = "us-east-1"
 ATHENA_DATABASE = "is459_aml_gold"
 
@@ -18,10 +21,20 @@ AGENT_QUEUE_MAX_K = 5000
 # The primary workgroup's default output is another team's bucket, so always set this.
 AGENT_ATHENA_OUTPUT = "s3://is459-aml-g1t5/athena-results/agent/"
 
-# The dataset ends here. A daily batch stops earlier, at the end of its own day.
-AGENT_DATA_HORIZON = "2022-09-16 23:59:59"
+# Days in the agent tables: from the first scored day to AGENT_LAST_DAY. The evaluated runs use
+# 16 Sep. The new-day path (state machine is459-agent-batch) sets AGENT_LAST_DAY to the ETL's day for
+# both the table rebuild and the batch, so a new day needs no code change (D43).
+AGENT_FIRST_SCORED_DAY = "2022-09-14"
+AGENT_LAST_SCORED_DAY = date.fromisoformat(os.environ.get("AGENT_LAST_DAY", "2022-09-16")).isoformat()
+if AGENT_LAST_SCORED_DAY < AGENT_FIRST_SCORED_DAY:
+    raise ValueError(f"AGENT_LAST_DAY {AGENT_LAST_SCORED_DAY} is before {AGENT_FIRST_SCORED_DAY}.")
 # Days with v2 BQ1 scores. Neighbours on other days are returned as unscored.
-AGENT_SCORED_DATES = ("2022-09-14", "2022-09-15", "2022-09-16")
+AGENT_SCORED_DATES = tuple(
+    (date.fromisoformat(AGENT_FIRST_SCORED_DAY) + timedelta(days=i)).isoformat()
+    for i in range((date.fromisoformat(AGENT_LAST_SCORED_DAY) - date.fromisoformat(AGENT_FIRST_SCORED_DAY)).days + 1)
+)
+# The data ends here. A daily batch stops earlier, at the end of its own day.
+AGENT_DATA_HORIZON = f"{AGENT_LAST_SCORED_DAY} 23:59:59"
 
 AGENT_TOP_K = 500
 AGENT_WINDOW_H_DEFAULT = 48

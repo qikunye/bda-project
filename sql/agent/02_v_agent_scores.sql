@@ -16,7 +16,9 @@ SELECT
   risk_score,
   risk_rank AS risk_rank_global,
   CASE
-    WHEN data_split = 'test'
+    -- Days after the split are 'excluded' (F22). Each day holds one ranked split, so 14-16 Sep keep
+    -- their ranks; 14 Sep's 'validation' rows stay unranked.
+    WHEN data_split IN ('test', 'excluded')
     THEN row_number() OVER (PARTITION BY txn_date, data_split ORDER BY risk_rank, transaction_id)
   END AS risk_rank_day,
   data_split,
