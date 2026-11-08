@@ -45,17 +45,17 @@ def test_offline_demo_journeys_a_b_c():
     app.session_state["ui_on_demand_services"] = {DEMO_SOURCE: runner}
     _button(app, "Run Agent Investigation").click().run()
     assert "SIMULATED ON-DEMAND RESULT" in _text(app)
-    views = next(widget for widget in app.radio if widget.label == "Evidence view")
-    assert views.value == "On-Demand Brief"
-    views.set_value("Saved Batch Brief").run()
+    views = next(widget for widget in app.radio if widget.label == "Investigation report")
+    assert views.value == "New Investigation"
+    views.set_value("Previous Investigation").run()
     assert "Saved run:" in _text(app)
-    next(widget for widget in app.radio if widget.label == "Evidence view").set_value("On-Demand Brief").run()
+    next(widget for widget in app.radio if widget.label == "Investigation report").set_value("New Investigation").run()
     app.run()
     runner.run.assert_called_once_with("txn_samplepass", "2022-09-14", window_h=48)
     assert not app.exception
 
     # C: Offline session group, explanation, pending state and deliberate refresh.
-    app.radio(key="ui_navigation_page").set_value("Real-Time Monitoring").run()
+    app.radio(key="ui_navigation_page").set_value("Real-Time Alert Lookup").run()
     assert not app.dataframe
     _button(app, "Load known alerts").click().run()
     assert len(app.dataframe[0].value) == 3

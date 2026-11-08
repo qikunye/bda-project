@@ -18,7 +18,7 @@ from src.ui.services.saved_results import DecisionBatch, SavedBrief
 from tests.ui.test_batch_dashboard import APP, content, dashboard, open_alert
 
 VERIFIED_ID = "txn_613ac569efe8fc2e024adfbeae71b746"
-PAGES = ["Alert Queue", "Investigation", "Real-Time Monitoring", "Agent Examples"]
+PAGES = ["Alert Queue", "Investigation", "Real-Time Alert Lookup", "Agent Examples"]
 
 
 def live_frame(score="0.9958", *, omit_score=False):
@@ -72,7 +72,7 @@ def test_twenty_live_rows_render_select_and_open_without_format_errors(monkeypat
     assert f"Risk score {expected}" in content(app)
     open_alert(app, VERIFIED_ID)
     assert f"Risk score {expected}" in content(app)
-    assert "No batch result is stored" in content(app)
+    assert "No investigation report is available" in content(app)
     assert not app.exception
     load.assert_called_once()
     saved.open.assert_called_once()

@@ -84,8 +84,6 @@ def render_investigation() -> None:
             st.error(saved.detail)
             if saved.failure:
                 st.caption(f"Debug reference: {saved.failure.reference}")
-        else:
-            st.info("No batch result is stored for this alert. On-demand execution requires an explicit submission.")
         entry = selection["entry"]
         st.text(f"{entry['source_account_key']} → {entry['target_account_key']}")
         st.caption(f"Daily rank {entry['risk_rank_day']} · Risk score {format_number(entry.get('risk_score'))} · "
@@ -96,21 +94,39 @@ def render_investigation() -> None:
                  "execution and may incur AWS costs. Completed results remain in this session only.")
         attempt, request_id = render_on_demand(selection, source)
     with result_area:
-        views = (["Saved Batch Brief"] if saved.result is not None else []) + (
-            ["On-Demand Brief"] if attempt is not None and attempt.result is not None else []
+        views = (["Previous Investigation"] if saved.result is not None else []) + (
+            ["New Investigation"] if attempt is not None and attempt.result is not None else []
         )
         if not views:
+            st.info("No investigation report is available for this alert. You can explicitly request a new investigation "
+                    "using the advanced controls below.")
             return
         st.divider()
         view_key = f"ui_on_demand_view_{request_id}"
-        if st.session_state.get(view_key) not in views:
-            st.session_state[view_key] = views[0]
-        view = st.radio("Evidence view", views, key=view_key, horizontal=True)
-        if len(views) > 1:
-            st.caption("The views have independent case membership, windows and data cutoffs. "
-                       "Their findings should not be compared as if they used identical evidence.")
-        st.caption(view)
-        if view == "Saved Batch Brief":
+        # Migrate the earlier labels, including the execution control's retained
+        # default, without changing request execution or evidence state.
+        previous_view = st.session_state.get(view_key)
+        migrated_view = {"Saved Batch Brief": "Previous Investigation", "On-Demand Brief": "New Investigation"}.get(
+            previous_view, previous_view,
+        )
+        if migrated_view not in views:
+            migrated_view = views[0]
+        if st.session_state.get(view_key) != migrated_view:
+            st.session_state[view_key] = migrated_view
+        if len(views) == 2:
+            view = st.radio("Investigation report", views, key=view_key, horizontal=True)
+            st.caption("The previous report was generated during batch processing; the new report was explicitly "
+                       "requested by the analyst. Their case membership, observation windows and evidence can differ."
+                       if source != DEMO_SOURCE else
+                       "These synthetic examples illustrate a previous batch investigation and an analyst-requested "
+                       "new investigation. Their case membership, observation windows and evidence can differ.")
+        else:
+            view = views[0]
+        st.subheader("Investigation Report" if view == "Previous Investigation" else "New Investigation Report")
+        if view == "Previous Investigation":
+            st.caption("Previously generated investigation, retrieved from AWS. Opening this report does not rerun the AI agent."
+                       if source != DEMO_SOURCE else
+                       "Previously generated example investigation, loaded from synthetic fixtures. Opening this report does not rerun the AI agent.")
             result = saved.result
             st.caption(f"Saved case · {len(result['members'])} member(s) · Window: ±{result['window_h']} hours")
             with st.expander("Saved investigation details", expanded=False):
@@ -124,6 +140,7 @@ def render_investigation() -> None:
                 st.info("Code-only demonstration — fixed rules built this brief; this is not a fallback.")
             render_result(result, selection["txn_id"])
         else:
+            st.caption("Explicitly requested by the analyst. This report is retained in the current session; viewing it does not rerun the AI agent.")
             context = (request_id, attempt.generation)
             if st.session_state.get("ui_on_demand_display_context") != context:
                 clear_evidence("ui_on_demand_display")

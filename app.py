@@ -56,13 +56,13 @@ st.set_page_config(
 PAGE_LABELS = {
     "Alert Queue": "Alert Queue",
     "Investigation": "Investigation",
-    "Real-Time Monitoring": "Real-Time Monitoring",
+    "Real-Time Alert Lookup": "Real-Time Alert Lookup",
     "Agent Examples": "Agent Examples",
 }
 PAGE_GUIDANCE = {
     "Alert Queue": "Find transactions to review.",
     "Investigation": "Explore money flow and supporting evidence.",
-    "Real-Time Monitoring": "Check stored incoming alerts and their Lambda explanations.",
+    "Real-Time Alert Lookup": "Retrieve stored DynamoDB alerts and Lambda explanations by transaction ID.",
     "Agent Examples": "Explore offline examples of investigation patterns.",
 }
 
@@ -71,6 +71,8 @@ PAGE_GUIDANCE = {
 previous_page = st.session_state.get("ui_navigation_page", "Alert Queue")
 if previous_page == "Agent Evidence Brief (Demo)":
     st.session_state["ui_navigation_page"] = "Agent Examples"
+elif previous_page == "Real-Time Monitoring":
+    st.session_state["ui_navigation_page"] = "Real-Time Alert Lookup"
 elif previous_page not in PAGE_LABELS:
     st.session_state["ui_navigation_page"] = "Alert Queue"
 
@@ -97,7 +99,7 @@ if page == "Investigation":
     render_investigation()
     st.stop()
 
-if page == "Real-Time Monitoring":
+if page == "Real-Time Alert Lookup":
     from src.ui.pages.realtime import render_realtime
 
     render_realtime()

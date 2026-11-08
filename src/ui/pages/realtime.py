@@ -26,7 +26,7 @@ class MonitoringSnapshot:
     source: str
     txn_ids: list[str]
     records: list[RealtimeRecord]
-    retrieved_at: str
+    retrieved_at: str | None
     label: str
     failure: ServiceFailure | None = None
 
@@ -39,7 +39,7 @@ def _service(source: str):
 
 
 def render_realtime() -> None:
-    st.title("Real-Time AML Monitoring")
+    st.title("Real-Time Alert Lookup")
     st.caption("View a scored alert, then read its explanation when available. Load or refresh explicitly; this page does not poll.")
     sources = [DEMO_SOURCE, LIVE_SOURCE]
     source = st.sidebar.radio("Real-time data source", sources, key="ui_rt_source",
@@ -55,11 +55,14 @@ def render_realtime() -> None:
     render_project_notices()
     with st.expander("Pipeline and integration scope", expanded=False):
         st.text("Kinesis → is459-rt-scorer → is459_rt_alerts → is459-rt-explainer → is459_rt_briefs → Streamlit")
-        st.write("This monitor reads persisted records only. It does not report pipeline health or start/stop sessions. "
+        st.write("This lookup reads persisted records only. It does not report pipeline health or start/stop sessions. "
                  "Automatic recent-alert listing is unavailable: the tables have no chronological index, "
                  "and the exported session helper discovers alerts by scanning, which this UI does not use. "
                  "No table scan is used.")
 
+    if st.session_state.get("ui_rt_input_source") != source:
+        st.session_state["ui_rt_input_source"] = source
+        st.session_state.pop("ui_rt_input_error", None)
     snapshot = st.session_state.get("ui_rt_snapshot")
     if snapshot is not None and snapshot.source != source:
         st.session_state.pop("ui_rt_snapshot", None)
@@ -72,28 +75,42 @@ def render_realtime() -> None:
             help=f"One ID per line or separated by commas. At most {MAX_LOOKUPS} IDs; input order is retained.",
         )
         submitted = st.form_submit_button("Load known alerts")
-    refresh = st.button("Refresh loaded alerts", disabled=snapshot is None)
+    refresh = st.button("Refresh loaded alerts", disabled=snapshot is None or snapshot.failure is not None)
     if submitted or refresh:
+        # Input errors are local guidance, not AWS failures. Keep the loaded
+        # snapshot and its timestamp unchanged until a lookup actually occurs.
         try:
             if refresh:
-                txn_ids, label = snapshot.txn_ids, snapshot.label
+                txn_ids, label = validate_ids(snapshot.txn_ids), snapshot.label
             else:
-                txn_ids = re.split(r"[,\n]+", ids_text.strip()) if ids_text.strip() else DEMO_GROUPS.get(group, [])
-                txn_ids = validate_ids(txn_ids)
+                raw_ids = [item.strip() for item in re.split(r"[,\n]+", ids_text) if item.strip()] if ids_text.strip() else DEMO_GROUPS.get(group, [])
+                txn_ids = validate_ids(raw_ids)
                 label = group if source == DEMO_SOURCE and not ids_text.strip() else "Explicit known-ID lookup"
-            records = _service(source).lookup_many(txn_ids)
-            snapshot = MonitoringSnapshot(source, txn_ids, records, datetime.now(timezone.utc).strftime(
-                "%Y-%m-%d %H:%M:%S UTC"), label)
-        except Exception as error:  # noqa: BLE001 -- UI boundary, no raw provider errors or fallback.
-            snapshot = MonitoringSnapshot(source, [], [], datetime.now(timezone.utc).strftime(
-                "%Y-%m-%d %H:%M:%S UTC"), "Lookup failed", describe_failure(error, "Real-time lookup"))
-        st.session_state["ui_rt_snapshot"] = snapshot
-        st.session_state.pop("ui_rt_selected_txn", None)
+        except ValueError as error:
+            st.session_state["ui_rt_input_error"] = str(error)
+        else:
+            st.session_state.pop("ui_rt_input_error", None)
+            try:
+                records = _service(source).lookup_many(txn_ids)
+                snapshot = MonitoringSnapshot(source, txn_ids, records, datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"), label)
+            except Exception as error:  # noqa: BLE001 -- service boundary; no raw provider errors or fallback.
+                snapshot = MonitoringSnapshot(source, [], [], None, "Lookup failed",
+                                              describe_failure(error, "Real-time lookup"))
+            st.session_state["ui_rt_snapshot"] = snapshot
+            st.session_state.pop("ui_rt_selected_txn", None)
+    if message := st.session_state.get("ui_rt_input_error"):
+        st.error(message)
     if snapshot is None:
-        st.info("Load a sample group or enter known IDs to inspect persisted alerts and explanations.")
+        st.info("Enter one or more transaction IDs processed by the real-time pipeline. The dashboard retrieves "
+                "stored alerts and Lambda explanations from DynamoDB."
+                if source == LIVE_SOURCE else
+                "Load a sample group to explore stored alerts and Lambda explanation examples without AWS.")
+        st.caption("IDs from the batch alert queue are not necessarily present in the separate real-time pipeline.")
         return
-    st.caption(f"{snapshot.label} · Last lookup completed: {snapshot.retrieved_at} "
-               "(retrieval time, not event freshness or processing latency)")
+    if snapshot.retrieved_at is not None:
+        st.caption(f"{snapshot.label} · Last lookup completed: {snapshot.retrieved_at} "
+                   "(retrieval time, not event freshness or processing latency)")
     if snapshot.failure is not None:
         st.error(snapshot.failure.message)
         st.caption(f"Debug reference: {snapshot.failure.reference}. No demo records were substituted.")

@@ -11,7 +11,7 @@ The default Alert Queue uses **Demo (offline)**. No credentials or network servi
 PyVis is pinned in `requirements.txt`; graph JavaScript is loaded from that
 installed package and embedded inline, without CDN requests.
 
-Navigation: **Alert Queue → Investigation → Real-Time Monitoring → Agent Examples**. Batch and real-time sources have separate
+Navigation: **Alert Queue → Investigation → Real-Time Alert Lookup → Agent Examples**. Batch and real-time sources have separate
 selectors; their loaded records never substitute for one another. The collapsed
 **Data and interpretation limits** section summarises the project limitations.
 
@@ -123,16 +123,25 @@ case-member browsing is a separate display operation.
    synchronously and may take 20 seconds or longer. Its own timeout, token,
    validation and spend controls remain authoritative. There is no background
    executor and the UI cannot forcibly cancel an active provider call.
-4. The **On-Demand Brief** appears without changing the saved result or writing
+4. The **New Investigation** appears without changing the saved result or writing
    DynamoDB. Ordinary reruns reuse it. Use **Run again** for another explicit
    submission; failures do not automatically retry or replace saved evidence.
 
-The two evidence views are independent:
+Report controls reflect what is available:
+
+- Saved only: **Investigation Report**, with retrieval/no-rerun guidance and no radio.
+- Saved and new: choose **Previous Investigation** or **New Investigation**.
+- New only: **New Investigation Report**, with no radio.
+- Neither: a helpful empty state and the existing explicit advanced execution controls.
+
+Live saved reports identify AWS retrieval; Demo reports identify synthetic fixtures.
+Old report-selection labels are migrated before keyed widgets render. Changing the
+number of reports never submits an investigation. The two reports are independent:
 
 | View | Membership and observation scope |
 |---|---|
-| Saved Batch Brief | Original saved case, window, run ID and creation time; historical end-of-day cutoff |
-| On-Demand Brief | Unsaved single-alert result, its own requested window and completion time; later payments may be visible up to the dataset horizon |
+| Previous Investigation | Original saved case, window, run ID and creation time; historical end-of-day cutoff |
+| New Investigation | Unsaved single-alert result, its own requested window and completion time; later payments may be visible up to the dataset horizon |
 
 Switch views to inspect each graph and brief. Evidence references and member
 selection are separate between views. Do not interpret different findings as a
@@ -188,9 +197,9 @@ exception type; the original exception is retained in the server-side failure
 object (`cause`) for debugger inspection, never rendered as JSON in the UI.
 After correcting access or connectivity, retry with a new explicit action.
 
-## Real-time monitoring journey
+## Real-Time Alert Lookup journey
 
-1. Select **Real-Time Monitoring**. Its source defaults to **Demo (offline)**.
+1. Select **Real-Time Alert Lookup**. Its source defaults to **Demo (offline)**.
 2. Leave **Sample session: mixed alerts** selected and click **Load known alerts**.
    The session is a clearly invented presentation group containing three alerts,
    not a claim that a production session manifest exists.
@@ -207,6 +216,14 @@ After correcting access or connectivity, retry with a new explicit action.
 
 For live reads, choose **Live DynamoDB (read-only)**, enter known transaction IDs
 (one per line or comma-separated, at most 20), and click **Load known alerts**.
+Empty input shows “Enter at least one transaction ID from the real-time pipeline.”
+More than 20 IDs, oversized IDs and IDs containing spaces/control characters show
+local input guidance before service/client creation, with no debug reference or
+new retrieval timestamp. A compatible previously loaded snapshot, selected record
+and lookup time remain usable after invalid input. Refresh still uses the loaded
+ID set, not invalid text in the form. Batch queue IDs are not necessarily present
+in the separate real-time pipeline; no batch IDs are filled in automatically.
+
 The service performs keyed reads of the alert and corresponding brief. It keeps
 input order and deduplicates IDs; this is **not a chronological recent feed**.
 There is no live session selector or automatic listing: deployed tables have no
@@ -354,7 +371,26 @@ findings remain unchanged.
 The isolated Chrome walkthrough also passed: four visible navigation options,
 Demo queue → native saved graph → queue, then a clearly labelled fake Live
 backend with 20 string-score rows, native row selection and the `0.9958` selected
-summary. Opening the mocked record, visiting Real-Time Monitoring and Agent
+summary. Opening the mocked record, visiting Real-Time Alert Lookup and Agent
 Examples caused no formatting exception or legacy UI fall-through. The harness
 performed no AWS/Bedrock operations; its temporary scripts remain outside Git at
 `/private/tmp/bda-queue-fix/`.
+
+## Report and lookup guidance verification
+
+The focused follow-up to `4130387` passed **836 unit/UI tests**, including 26 new
+cases for report availability, stale choices, independent evidence, local input
+validation, snapshot retention, classified read failures and old navigation state.
+**Real-Time Monitoring** session state safely migrates to **Real-Time Alert Lookup**.
+The on-demand execution implementation, agent contracts, publication and storage
+remain unchanged. The existing 14 unrelated repository Ruff findings remain;
+touched-file Ruff, dependency and whitespace checks pass.
+
+An isolated Chrome Demo walkthrough confirmed the single-report heading without
+a radio, previous/new report switching with separate evidence, the renamed page,
+pending explanations and retention of the loaded record/time after invalid input.
+Empty Live input showed actionable local guidance without calling a service.
+Both the full test run and browser guard recorded zero forbidden AWS/agent
+operations. Temporary browser harnesses/screenshots are outside Git under
+`/private/tmp/bda-report-lookup/`; no live verification or real investigation was
+repeated.

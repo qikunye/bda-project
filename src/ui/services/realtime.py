@@ -76,11 +76,13 @@ class RealtimeSchemaError(ValueError):
 
 
 def validate_ids(txn_ids: list[str]) -> list[str]:
-    if not txn_ids or len(txn_ids) > MAX_LOOKUPS:
-        raise ValueError(f"Provide between 1 and {MAX_LOOKUPS} known transaction IDs.")
-    if any(not isinstance(txn, str) or not txn.strip() or len(txn) > 256 or not txn.isprintable()
+    if not txn_ids:
+        raise ValueError("Enter at least one transaction ID from the real-time pipeline.")
+    if len(txn_ids) > MAX_LOOKUPS:
+        raise ValueError(f"Enter at most {MAX_LOOKUPS} transaction IDs per lookup.")
+    if any(not isinstance(txn, str) or not txn.strip() or len(txn) > 256 or not txn.isprintable() or any(char.isspace() for char in txn.strip())
            for txn in txn_ids):
-        raise ValueError("Each transaction ID must be a nonempty printable string of at most 256 characters.")
+        raise ValueError("Each transaction ID must contain at most 256 printable characters, without spaces or control characters.")
     return list(dict.fromkeys(txn.strip() for txn in txn_ids))
 
 

@@ -51,7 +51,7 @@ def test_every_scenario_renders_supplied_content_without_aws(scenario):
     assert "Full analysis days end on 16 Sep 2022." in content
     assert app.selectbox(key="agent_demo_scenario").options == list(agent_demo.SCENARIO_LABELS.values())
     assert app.radio(key="ui_navigation_page").options == [
-        "Alert Queue", "Investigation", "Real-Time Monitoring", "Agent Examples",
+        "Alert Queue", "Investigation", "Real-Time Alert Lookup", "Agent Examples",
     ]
     assert "investigation" not in app.session_state
     assert not app.button  # No action can accidentally execute the agent.

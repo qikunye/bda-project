@@ -117,7 +117,7 @@ def test_unresolved_and_capped_evidence_have_explicit_limitations(capped, expect
 
 
 @pytest.mark.parametrize(("txn_id", "expected"), [
-    ("txn_demounprocessed", "No batch result is stored"),
+    ("txn_demounprocessed", "No investigation report is available"),
     ("txn_samplenograph", "No supported finding was identified"),
     ("txn_samplefallback", "Code-only fallback"),
     ("txn_samplecodeonly", "Code-only demonstration"),

@@ -32,7 +32,19 @@ def button(app, label):
 
 
 def view(app):
-    return next(widget for widget in app.radio if widget.label == "Evidence view")
+    return next(widget for widget in app.radio if widget.label == "Investigation report")
+
+
+def report_options(app):
+    selectors = [widget for widget in app.radio if widget.label == "Investigation report"]
+    if selectors:
+        return selectors[0].options
+    headings = [heading.value for heading in app.subheader]
+    if "Investigation Report" in headings:
+        return ["Previous Investigation"]
+    if "New Investigation Report" in headings:
+        return ["New Investigation"]
+    return []
 
 
 def window(app):
@@ -117,17 +129,17 @@ def test_live_acknowledgement_and_separate_click_are_both_required():
     button(app, "Run Agent Investigation").click().run()
     assert not app.exception
     runner.assert_called_once_with("txn_samplepass", "2022-09-14", window_h=48)
-    assert view(app).value == "On-Demand Brief"
+    assert view(app).value == "New Investigation"
     assert "Unsaved single-alert result" in content(app)
     app.run()
     next(widget for widget in app.button if widget.key and widget.key.startswith(
         "ui_on_demand_display_evidence_finding_0_"
     )).click().run()
     assert "The exact transaction is highlighted" in content(app)
-    view(app).set_value("Saved Batch Brief").run()
+    view(app).set_value("Previous Investigation").run()
     assert "Saved run:" in content(app)
     app.button(key="ui_evidence_finding_0_0").click().run()
-    view(app).set_value("On-Demand Brief").run()
+    view(app).set_value("New Investigation").run()
     runner.assert_called_once()
     assert backend.load_queue.call_count == backend.open.call_count == 1
     assert app.session_state["ui_batch_selection"]["saved"] == saved_before
@@ -140,12 +152,12 @@ def test_no_saved_decision_still_permits_explicit_live_investigation():
     result = deepcopy(sample_investigations()["not_found"])
     result["txn_id"] = result["alert"]["txn_id"] = "txn_demounprocessed"
     app, runner, _ = setup_live("txn_demounprocessed", Mock(return_value=result))
-    assert "No batch result is stored" in content(app)
+    assert "No investigation report is available" in content(app)
     assert not app.get("iframe")
     approve(app)
     button(app, "Run Agent Investigation").click().run()
     assert "Transaction not found." in content(app)
-    assert view(app).options == ["On-Demand Brief"]
+    assert report_options(app) == ["New Investigation"]
     runner.assert_called_once_with("txn_demounprocessed", "2022-09-14", window_h=48)
     assert app.session_state["ui_batch_selection"]["saved"].result is None
     assert not app.exception
@@ -156,12 +168,12 @@ def test_changed_window_hides_stale_result_and_requires_new_approval():
     approve(app)
     button(app, "Run Agent Investigation").click().run()
     window(app).set_value(24).run()
-    assert view(app).options == ["Saved Batch Brief"]
+    assert report_options(app) == ["Previous Investigation"]
     assert button(app, "Run Agent Investigation").disabled
     assert "Unsaved single-alert result" not in content(app)
     runner.assert_called_once()
     window(app).set_value(48).run()
-    assert "On-Demand Brief" in view(app).options
+    assert "New Investigation" in report_options(app)
     runner.assert_called_once()
 
 
@@ -171,16 +183,16 @@ def test_target_source_and_date_do_not_reuse_unrelated_results():
     button(app, "Run Agent Investigation").click().run()
     app.button[0].click().run()
     open_alert(app, "txn_samplereturn")
-    assert view(app).options == ["Saved Batch Brief"]
+    assert report_options(app) == ["Previous Investigation"]
     runner.assert_called_once()
     app.button[0].click().run()
     app.selectbox(key="ui_batch_day").set_value("2022-09-16")
     button(app, "Load / refresh queue").click().run()
     open_alert(app, "txn_samplequiet")
-    assert view(app).options == ["Saved Batch Brief"]
+    assert report_options(app) == ["Previous Investigation"]
     app.radio(key="ui_batch_source").set_value(DEMO_SOURCE).run()
     assert "Unsaved single-alert result" not in content(app)
-    assert "Evidence view" not in [widget.label for widget in app.radio]
+    assert "Investigation report" not in [widget.label for widget in app.radio]
     runner.assert_called_once()
 
 
@@ -198,11 +210,11 @@ def test_saved_grouped_case_is_not_used_as_single_alert_on_demand_evidence():
     assert not app.selectbox
     assert "Representative alert: txn_samplefan" not in content(app)
     assert "Selected alert · 1 supported findings" in content(app)
-    view(app).set_value("Saved Batch Brief").run()
+    view(app).set_value("Previous Investigation").run()
     assert "Overall case · 4 supported findings" in content(app)
     assert "Original saved investigation window: ±48 hours" in content(app)
     assert len(app.selectbox(key="ui_batch_member").options) == 2
-    view(app).set_value("On-Demand Brief").run()
+    view(app).set_value("New Investigation").run()
     assert "Requested window: ±24 hours" in content(app)
     runner.assert_called_once_with("txn_samplefanmember", "2022-09-14", window_h=24)
 
@@ -217,7 +229,7 @@ def test_failure_preserves_saved_evidence_and_does_not_retry(error):
     button(app, "Run Agent Investigation").click().run()
     assert app.error
     assert "SECRET-DO-NOT-DISPLAY" not in content(app)
-    assert view(app).options == ["Saved Batch Brief"]
+    assert report_options(app) == ["Previous Investigation"]
     assert app.session_state["ui_batch_selection"]["saved"] == saved
     app.run()
     runner.assert_called_once()
@@ -242,7 +254,7 @@ def test_invented_demo_alert_reports_no_simulation_and_never_calls_real_agent():
     app = open_alert(dashboard(), "txn_demounprocessed")
     button(app, "Run Agent Investigation").click().run()
     assert "No simulated single-alert result is available" in content(app)
-    assert "Evidence view" not in [widget.label for widget in app.radio]
+    assert "Investigation report" not in [widget.label for widget in app.radio]
     assert not app.exception
 
 
@@ -250,7 +262,7 @@ def test_bad_runner_identity_is_rejected_instead_of_showing_another_alert():
     app, runner, _ = setup_live(runner=Mock(return_value=sample_investigations()["money_returns"]))
     approve(app)
     button(app, "Run Agent Investigation").click().run()
-    assert view(app).options == ["Saved Batch Brief"]
+    assert report_options(app) == ["Previous Investigation"]
     assert app.error
     runner.assert_called_once()
 
@@ -341,7 +353,7 @@ def test_on_demand_currency_metrics_and_trace_only_evidence_are_independent():
     assert app.dataframe[0].value["Currency"].tolist() == ["US Dollar", "Euro"]
     button(app, "txn_traceonly").click().run()
     assert "outside the displayed money-flow graph" in content(app)
-    view(app).set_value("Saved Batch Brief").run()
+    view(app).set_value("Previous Investigation").run()
     assert app.dataframe[0].value["Currency"].tolist() == ["US Dollar"]
     assert "txn_traceonly" not in content(app)
     runner.assert_called_once()
@@ -354,7 +366,7 @@ def test_failed_explicit_rerun_cannot_fabricate_success_or_replace_saved_data():
     button(app, "Run Agent Investigation").click().run()
     saved = app.session_state["ui_batch_selection"]["saved"]
     button(app, "Run again").click().run()
-    assert view(app).options == ["Saved Batch Brief"]
+    assert report_options(app) == ["Previous Investigation"]
     assert "Transient service failure" in content(app)
     assert "private.invalid" not in content(app)
     assert app.session_state["ui_batch_selection"]["saved"] is saved
@@ -377,8 +389,8 @@ def test_saved_member_and_highlight_survive_on_demand_view_switch():
     assert app.selectbox(key="ui_batch_member").value == "txn_samplefan"
     approve(app)
     button(app, "Run Agent Investigation").click().run()
-    assert view(app).value == "On-Demand Brief"
-    view(app).set_value("Saved Batch Brief").run()
+    assert view(app).value == "New Investigation"
+    view(app).set_value("Previous Investigation").run()
     assert app.selectbox(key="ui_batch_member").value == "txn_samplefan"
     assert app.session_state["ui_batch_evidence"] == "txn_samplefanup"
     assert "The exact transaction is highlighted" in content(app)
