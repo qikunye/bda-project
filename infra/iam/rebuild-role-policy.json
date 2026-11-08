@@ -13,7 +13,7 @@
                   "arn:aws:glue:us-east-1:__ACCOUNT_ID__:table/is459_aml_gold/agent_scores_v2","arn:aws:glue:us-east-1:__ACCOUNT_ID__:table/is459_aml_gold/agent_edges_v2","arn:aws:glue:us-east-1:__ACCOUNT_ID__:table/is459_aml_gold/agent_day_queue_v2"]},
     {"Sid": "GoldRead", "Effect": "Allow",
      "Action": ["s3:GetObject"],
-     "Resource": ["arn:aws:s3:::is459-aml-g1t5/gold/bq1/v2/*","arn:aws:s3:::is459-aml-g1t5/gold/bq2/v2/*"]},
+     "Resource": ["arn:aws:s3:::is459-aml-g1t5/gold/bq1/v2/*","arn:aws:s3:::is459-aml-g1t5/gold/bq2/v2/*","arn:aws:s3:::is459-aml-g1t5/gold/bq2/graph_edges/li-medium-v1/*"]},
     {"Sid": "AgentTablesS3", "Effect": "Allow",
      "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload"],
      "Resource": ["arn:aws:s3:::is459-aml-g1t5/agent/tables/*","arn:aws:s3:::is459-aml-g1t5/athena-results/agent/*"]},

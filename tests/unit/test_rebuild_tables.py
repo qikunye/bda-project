@@ -100,6 +100,11 @@ class Fakes:
         )
 
     def query(self, sql):
+        if "LIMIT 1" in sql:
+            self.events.append(("present", sql.split("is459_aml_gold.")[1].split()[0]))
+            if getattr(self, "missing", None) and self.missing in sql:
+                raise AthenaQueryError("table not found")
+            return pd.DataFrame([{"present": 1}])
         if self.fail_first_query and not self.fingerprints[0] is None:
             self.fail_first_query = False
             raise AthenaQueryError("table not found")
@@ -187,7 +192,16 @@ def test_a_day_the_tables_already_hold_changes_nothing():
         {"2022-09-14": ("10", "aa"), "2022-09-15": ("5", "bb"), "2022-09-16": ("7", "cc"), "2022-09-17": ("1", "dd")}
     ]
     assert run_rebuild(fakes) == []
-    assert [e[0] for e in fakes.events] == ["fingerprint"]
+    assert [e[0] for e in fakes.events] == ["fingerprint", "present", "present"]
+
+
+def test_a_half_finished_rebuild_is_redone():
+    fakes = Fakes(fingerprints_after={"2022-09-14": ("10", "aa"), "2022-09-15": ("5", "bb"), "2022-09-16": ("7", "cc")})
+    fakes.fingerprints.insert(0, {"2022-09-14": ("10", "aa"), "2022-09-15": ("5", "bb"), "2022-09-16": ("7", "cc")})
+    fakes.fingerprints.pop(1)
+    fakes.missing = "agent_edges_v2"
+    assert run_rebuild(fakes) == []
+    assert ("sql", "CREATE agent_edges_v2") in fakes.events
 
 
 def test_a_rebuild_that_would_drop_a_later_day_is_refused(monkeypatch):

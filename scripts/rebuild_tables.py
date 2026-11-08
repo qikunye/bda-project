@@ -105,7 +105,18 @@ def fingerprints(query) -> dict[str, tuple[str, str]]:
     return {r["txn_date"]: (r["n"], r["fp"]) for r in frame.to_dict("records")}
 
 
-def rebuild(*, execute, query, list_keys, delete_keys, log=print) -> list[str]:
+def tables_present(query) -> bool:
+    """The edges and queue tables exist. A rebuild that failed part way leaves only the scores."""
+
+    try:
+        for name in ("agent_edges_v2", "agent_day_queue_v2"):
+            query(f"SELECT 1 AS present FROM is459_aml_gold.{name} LIMIT 1")
+    except AthenaQueryError:
+        return False
+    return True
+
+
+def rebuild(*, execute, query, list_keys, delete_keys, log=print, force=False) -> list[str]:
     """Drop, clear and rebuild the tables. Returns the days whose ranks changed (should be none)."""
 
     plan = (
@@ -121,7 +132,7 @@ def rebuild(*, execute, query, list_keys, delete_keys, log=print) -> list[str]:
     # The new-day path calls this for every ETL day. A day the tables already hold needs nothing, and
     # a rebuild that would drop a later day is refused, so a replayed old day never shrinks them.
     wanted = set(config.AGENT_SCORED_DATES)
-    if before and wanted <= set(before):
+    if not force and before and wanted <= set(before) and tables_present(query):
         log("The tables already hold every scored day; nothing rebuilt.")
         return []
     later = sorted(d for d in before if d not in wanted)
@@ -154,6 +165,7 @@ def rebuild(*, execute, query, list_keys, delete_keys, log=print) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--yes", action="store_true", help="Actually drop and rebuild.")
+    parser.add_argument("--force", action="store_true", help="Rebuild even if the tables already hold every day.")
     args = parser.parse_args()
 
     ranges = date_ranges()
@@ -215,7 +227,7 @@ def main() -> int:
             )
 
     changed = rebuild(
-        execute=execute, query=query, list_keys=list_keys, delete_keys=delete_keys
+        execute=execute, query=query, list_keys=list_keys, delete_keys=delete_keys, force=args.force
     )
     return 1 if changed else 0
 
