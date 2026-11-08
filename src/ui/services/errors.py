@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, LoginRefreshRequired
 
 
 @dataclass
@@ -20,7 +20,7 @@ def describe_failure(error: Exception, operation: str) -> ServiceFailure:
     name = type(error).__name__.lower()
     # Inspect messages only for classification; never return or log the raw message/response.
     text = str(error).lower()
-    if any(word in name for word in ("credential", "token", "profile")) or code in {
+    if isinstance(error, LoginRefreshRequired) or any(word in name for word in ("credential", "token", "profile")) or code in {
         "expiredtoken", "expiredtokenexception", "invalidclienttokenid", "unrecognizedclientexception",
         "invalidsignatureexception", "requestexpired", "authfailure",
     }:

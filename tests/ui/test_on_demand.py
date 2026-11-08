@@ -7,7 +7,12 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from botocore.exceptions import ClientError, NoCredentialsError, ReadTimeoutError
+from botocore.exceptions import (
+    ClientError,
+    LoginRefreshRequired,
+    NoCredentialsError,
+    ReadTimeoutError,
+)
 
 from src.agent.sample_results import sample_investigations
 from src.aws.athena import AthenaQueryError
@@ -252,6 +257,7 @@ def test_bad_runner_identity_is_rejected_instead_of_showing_another_alert():
 
 @pytest.mark.parametrize(("error", "category"), [
     (NoCredentialsError(), "Authentication failure"),
+    (LoginRefreshRequired(), "Authentication failure"),
     (ClientError({"Error": {"Code": "ExpiredToken", "Message": "secret"}}, "GetItem"), "Authentication failure"),
     (ClientError({"Error": {"Code": "AccessDeniedException", "Message": "secret"}}, "GetItem"), "Insufficient permissions"),
     (AthenaQueryError("TABLE_NOT_FOUND secret"), "Missing data table or resource"),
@@ -272,6 +278,21 @@ def test_live_athena_table_error_is_safe_and_not_an_empty_queue():
     assert "Missing data table or resource" in content(app)
     assert "secret table response" not in content(app)
     assert "No alerts are available" not in content(app)
+
+
+def test_expired_cli_login_is_identified_before_any_queue_records_are_shown():
+    backend = Mock()
+    backend.load_queue.side_effect = LoginRefreshRequired()
+    app = dashboard(backend, LIVE_SOURCE)
+    backend.load_queue.assert_not_called()
+    button(app, "Load / refresh queue").click().run()
+    assert "Authentication failure" in content(app)
+    assert "Refresh the AWS login" in content(app)
+    assert "Request failed" not in content(app)
+    assert not app.dataframe and not app.exception
+    assert app.radio(key="ui_batch_source").value == LIVE_SOURCE
+    backend.load_queue.assert_called_once()
+    backend.open.assert_not_called()
 
 
 def test_decision_authentication_error_reaches_opened_alert_without_becoming_missing(monkeypatch):
