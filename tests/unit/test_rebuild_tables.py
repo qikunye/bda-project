@@ -179,3 +179,37 @@ def test_without_yes_it_touches_nothing(monkeypatch, capsys):
     assert rebuild_tables.main() == 0
     out = capsys.readouterr().out
     assert "Dry run" in out and "agent_scores_v2" in out
+
+
+def test_a_day_the_tables_already_hold_changes_nothing():
+    fakes = Fakes()
+    fakes.fingerprints = [
+        {"2022-09-14": ("10", "aa"), "2022-09-15": ("5", "bb"), "2022-09-16": ("7", "cc"), "2022-09-17": ("1", "dd")}
+    ]
+    assert run_rebuild(fakes) == []
+    assert [e[0] for e in fakes.events] == ["fingerprint"]
+
+
+def test_a_rebuild_that_would_drop_a_later_day_is_refused(monkeypatch):
+    monkeypatch.setattr(config, "AGENT_SCORED_DATES", ("2022-09-14", "2022-09-15", "2022-09-16", "2022-09-17", "2022-09-18"))
+    fakes = Fakes()
+    fakes.fingerprints = [{"2022-09-14": ("10", "aa"), "2022-09-19": ("1", "zz")}]
+    with pytest.raises(RuntimeError, match="2022-09-19"):
+        run_rebuild(fakes)
+    assert [e[0] for e in fakes.events] == ["fingerprint"]
+
+
+def test_last_day_comes_from_the_environment(monkeypatch):
+    import importlib
+
+    monkeypatch.setenv("AGENT_LAST_DAY", "2022-09-18")
+    fresh = importlib.reload(config)
+    try:
+        assert fresh.AGENT_SCORED_DATES[-2:] == ("2022-09-17", "2022-09-18")
+        assert fresh.AGENT_DATA_HORIZON == "2022-09-18 23:59:59"
+        monkeypatch.setenv("AGENT_LAST_DAY", "2022-09-01")
+        with pytest.raises(ValueError):
+            importlib.reload(config)
+    finally:
+        monkeypatch.delenv("AGENT_LAST_DAY")
+        importlib.reload(config)

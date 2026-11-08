@@ -1,12 +1,43 @@
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {"Effect": "Allow", "Action": ["ecs:RunTask"], "Resource": "arn:aws:ecs:us-east-1:__ACCOUNT_ID__:task-definition/is459-agent-batch:*"},
-    {"Effect": "Allow", "Action": ["ecs:StopTask","ecs:DescribeTasks"], "Resource": "*"},
-    {"Effect": "Allow", "Action": "iam:PassRole",
-     "Resource": ["arn:aws:iam::__ACCOUNT_ID__:role/is459-agent-task-exec-role","arn:aws:iam::__ACCOUNT_ID__:role/is459-agent-task-role"]},
-    {"Effect": "Allow", "Action": ["events:PutTargets","events:PutRule","events:DescribeRule"],
-     "Resource": "arn:aws:events:us-east-1:__ACCOUNT_ID__:rule/StepFunctionsGetEventsForECSTaskRule"},
-    {"Effect": "Allow", "Action": "sns:Publish", "Resource": "arn:aws:sns:us-east-1:__ACCOUNT_ID__:is459-etl-v2-failure-topic"}
-  ]
+ "Version": "2012-10-17",
+ "Statement": [
+  {
+   "Effect": "Allow",
+   "Action": [
+    "ecs:RunTask"
+   ],
+   "Resource": "arn:aws:ecs:us-east-1:__ACCOUNT_ID__:task-definition/is459-agent-batch:*"
+  },
+  {
+   "Effect": "Allow",
+   "Action": [
+    "ecs:StopTask",
+    "ecs:DescribeTasks"
+   ],
+   "Resource": "*"
+  },
+  {
+   "Effect": "Allow",
+   "Action": "iam:PassRole",
+   "Resource": [
+    "arn:aws:iam::__ACCOUNT_ID__:role/is459-agent-task-exec-role",
+    "arn:aws:iam::__ACCOUNT_ID__:role/is459-agent-task-role",
+    "arn:aws:iam::__ACCOUNT_ID__:role/is459-agent-rebuild-role"
+   ]
+  },
+  {
+   "Effect": "Allow",
+   "Action": [
+    "events:PutTargets",
+    "events:PutRule",
+    "events:DescribeRule"
+   ],
+   "Resource": "arn:aws:events:us-east-1:__ACCOUNT_ID__:rule/StepFunctionsGetEventsForECSTaskRule"
+  },
+  {
+   "Effect": "Allow",
+   "Action": "sns:Publish",
+   "Resource": "arn:aws:sns:us-east-1:__ACCOUNT_ID__:is459-etl-v2-failure-topic"
+  }
+ ]
 }

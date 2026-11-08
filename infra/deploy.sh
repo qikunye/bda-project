@@ -51,6 +51,7 @@ make_role() {  # name trust-file policy-file
 make_role is459-agent-task-exec-role trust-ecs-tasks.json
 run aws iam attach-role-policy --role-name is459-agent-task-exec-role --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 make_role is459-agent-task-role trust-ecs-tasks.json task-role-policy.json
+make_role is459-agent-rebuild-role trust-ecs-tasks.json rebuild-role-policy.json   # D43: table rebuild only, can read Gold
 make_role is459-agent-sfn-role trust-states.json states-role-policy.json
 make_role is459-agent-events-role trust-events.json events-role-policy.json
 [ "${DRY_RUN:-0}" = "1" ] || sleep 10   # let IAM settle
