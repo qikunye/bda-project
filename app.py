@@ -53,6 +53,18 @@ st.set_page_config(
     layout="wide"
 )
 
+page = st.sidebar.radio(
+    "Application",
+    ["BQ2 Money Trail (Legacy)", "Agent Evidence Brief (Demo)"],
+    key="ui_navigation_page",
+)
+
+if page == "Agent Evidence Brief (Demo)":
+    from src.ui.pages.agent_demo import render_agent_demo
+
+    render_agent_demo()
+    st.stop()
+
 
 # ============================================================
 # AWS CLIENT
