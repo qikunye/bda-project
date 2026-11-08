@@ -2,14 +2,14 @@
 
 Owner: Claire (agent and evaluation). Last updated 8 Nov 2026. Team split: `WORK_SPLIT.md` (deleted from the working folder but still in git: `git show HEAD:WORK_SPLIT.md`). ETL and real-time details: `ETL_v2_Handover.docx` (kept outside this repo).
 
-**Status:** the ETL and real-time pipelines are finished. On 7 Nov the agent was rebuilt as an investigation assistant (D31): it writes an evidence brief per case with no verdict. On 7-8 Nov the new tools, S1 and the LLM loop ran on real Athena and Bedrock for 14 Sep (F37), the thresholds were set from label-free distributions (D36, F36), and the problems the runs showed were fixed (D37-D39). 595 unit tests pass, using fakes. The evaluation harness (`src/evaluation/`, `scripts/run_evaluation.py`, instructions in `docs/evaluation.md`) is written but has not run, because it reads labels. **Nothing is frozen yet:** the freeze commit and the saved 14-16 Sep runs are next. Streamlit has not started, so the output format (`docs/agent_output_format.md`) needs no one's agreement and can still change. The old triage version is frozen in commit `91e344e` (not pushed) as a fallback. DynamoDB holds only out-of-date 14 Sep rows (F29), and no one has looked at labels.
+**Status (8 Nov):** the ETL and real-time pipelines are finished. The agent is an investigation assistant (D31): it writes an evidence brief per case with no verdict. The D31 code is frozen in commits `e3349bc` and `8cba880`, with D41 and D42 on top; `91e344e` freezes the old triage version and is kept as a fallback. On 8 Nov the 14-16 Sep S1 and S2 runs, the deeper S1 lists, the repeat runs and the evaluation were done on Sonnet 4.6 (D42). Results: `docs/evaluation_results.md`; run files: `s3://is459-aml-g1t5/agent/traces/eval-runs/`. DynamoDB holds those S2 runs (`batch-2022-09-1{4,5,6}-20261108T020412Z`: 300 rows in `is459_agent_decisions`, 237 in `is459_agent_cases`). Streamlit is merged (PR #8; `docs/streamlit_dashboard.md`). The Fargate trigger and the new-day path (D40, D43) are deployed, and the unused SQS queue and its DLQ were deleted on 8 Nov. **Still open:** marking about 50 observations by hand, a saved new-day run (the 17 Sep test stopped at Sonnet 4.6's daily token quota before saving), the recordings, and the report.
 
 ## Where to continue
 
-1. **Freeze in a commit** (before anyone looks at labels): `git add src tests docs scripts` and commit. That fixes the thresholds and rules in `src/config.py` (D36), the prompt, the S1 neighbour scoring (D37) and the Athena retry (D38). `runs/` holds large local outputs and is not committed. After the freeze, any change to `src/` is reported as "tuned after the results".
-2. **Done 8 Nov** (D42, Sonnet 4.6): saved runs `batch-2022-09-1{4,5,6}-20261108T020412Z`, evaluation and repeats. Results in `docs/evaluation_results.md`.
-3. **Evaluation:** follow `docs/evaluation.md`. Mark about 50 observations by hand first (`--review-only`), then run `scripts/run_evaluation.py ... --confirm-frozen`. The harness has not been run on real data, so expect small fixes.
-4. Then the **new-day path** and **recordings** (section 19).
+1. **Mark the observations by hand:** `review_2022-09-1{4,5,6}.csv` in `s3://is459-aml-g1t5/agent/traces/eval-runs/sonnet46/`, then rerun `run_evaluation --marked-csv`. Until then, whether observations are useful is not measured (`docs/evaluation_results.md`, "Still open").
+2. **Recordings (section 19).** They can use the saved 14-16 Sep runs: Streamlit's Live batch source reads DynamoDB and needs no Bedrock. The on-demand Investigate button calls Bedrock, so avoid it while the quota is out. D18 planned an 18 Sep run: confirm with the team whether to keep that.
+3. **New-day path (D43):** the 17 Sep test passed the rebuild and started briefing but was stopped by Sonnet 4.6's daily token quota before saving. Bedrock quotas are per model and reset about 24 h after use. Do one end-to-end save on a new day when the quota is back.
+4. **Write the report.** State the limits in section 15 and F40.
 5. **Open choices** the owner may want to revisit: `REPEAT_ACCOUNT_ALERTS` fires on 37% of cases and has no threshold (it fires for any other top-100 alert on the same accounts), and `PASS_THROUGH` needs an upstream payment in the alert's own currency (F36, F38).
 
 ## 1. Facts
@@ -22,7 +22,7 @@ Owner: Claire (agent and evaluation). Last updated 8 Nov 2026. Team split: `WORK
 - **Gold tables** (`is459_aml_gold`, partitioned by `txn_date`): `bq1_risk_scores_medium_v2`, `bq1_features_medium_v2`, `bq2_graph_edges_medium_v2`. All contain labels.
 - **Agent tables** (label-free, `agent/tables/`, read by the tools): `agent_scores_v2`, `agent_edges_v2`, `agent_day_queue_v2`. Built by `sql/agent/01-06`.
 - **Demo alert:** `txn_a0f703e20da6f9bf0bdad4c0d62862de`, 14 Sep 10:57, day rank 2, has reasons, complete 48 h graph (22 neighbours).
-- **Cost:** about US$0.14 per case with Sonnet 4.5; a day's top 100 alerts (about 78 cases) costs about US$11 and takes about 17 minutes (F37). The default spend cap of US$10 a process is too low for a full day: use `--spend-cap 20`.
+- **Cost:** about US$0.10 per case with Sonnet 4.6 (D42). A day's top 100 alerts (77 to 82 cases) cost US$8 to 9 and take 15 to 20 minutes; the three evaluated days cost US$25.00 (`docs/evaluation_results.md`). With Sonnet 4.5 it was about US$0.14 a case (F37). The default spend cap of US$10 a process is too low for a full day: use `--spend-cap 20`. Bedrock's daily token quota is per model and resets about 24 h after use (Sonnet 4.5: 27M, not adjustable), so run one day per window.
 - **Commands:** tests `.venv/bin/python -m pytest tests` (bare `pytest` fails on a name clash). Tools `python -m scripts.smoke_agent_tools`. S1 `python -m scripts.run_s1 --day <day> --out <file>`. LLM sample `python -m scripts.run_agent_sample --day <day> --limit 20 --out <file>`. Batch `python -m scripts.run_batch --day <day> --out <file>` is a dry run; add `--save` to write. Evaluation `python -m scripts.run_evaluation` (see `docs/evaluation.md`).
 
 ## 2. Hard rules
@@ -40,8 +40,9 @@ Owner: Claire (agent and evaluation). Last updated 8 Nov 2026. Team split: `WORK
 ```
 DAILY      raw CSV → Step Functions is459-etl-v2-silver-wap → Gold
            (parse → audit + 11 quality rules → publish Silver → BQ1 and BQ2 in parallel → Gold commit)
-           success message → SQS is459-etl-v2-day-ready
-           → agent tables rebuilt → case grouping → agent per case → DynamoDB + S3 traces → Streamlit
+           success event → EventBridge rule is459-etl-v2-day-succeeded → Step Functions is459-agent-batch (D40, D43)
+           → Fargate: agent tables rebuilt for the new day → Fargate: case grouping → agent per case
+           → DynamoDB + S3 traces → Streamlit
            Analyst's Investigate button → same agent on one alert → Streamlit
 
 REAL-TIME  Kinesis → Lambda is459-rt-scorer (same model, 26 features)
@@ -57,7 +58,7 @@ REAL-TIME  Kinesis → Lambda is459-rt-scorer (same model, 26 features)
 - **Summary:** one short sentence from the LLM, with no numbers.
 - **Observations (D34):** up to three short remarks of the LLM's own, each citing tool-returned IDs, shown as the agent's reading. Code checks IDs and wording only.
 
-The brief gives no verdict: the analyst decides. The current code still produces triage verdicts, as described in D27-D30.
+The brief gives no verdict: the analyst decides. The code produces no verdicts; the old triage version (D27-D30) is kept in commit `91e344e`.
 
 ## 4. Triggers
 
@@ -165,7 +166,7 @@ S0 = BQ1 order with no brief. S1 = code-only brief. S2 = LLM brief.
 
 ## 10. Storage
 
-- `is459_agent_decisions`: key `transaction_id`, rows as in `DecisionRow`. Holds only the out-of-date 14 Sep run (F29).
+- `is459_agent_decisions`: key `transaction_id`, rows as in `DecisionRow`. Holds the 8 Nov S2 runs for 14-16 Sep (`batch-2022-09-1{4,5,6}-20261108T020412Z`, model Sonnet 4.6): 100 rows a day, of which 4, 3 and 7 are fallback briefs. Checked in AWS on 8 Nov. The out-of-date run in F29 is gone.
 - `is459_agent_cases` (on-demand, tagged `project=is459-g1t5-etl-v2`): key `day` + `case_id`. One item per case, singles included (`CaseRow` in `contracts.py`).
 - Traces: `s3://is459-aml-g1t5/agent/traces/<day>/<txn_id>.json`.
 - A batch rerun writes the new rows first, then deletes that day's rows it did not rewrite (scan on `day`, no index). If any case failed, nothing is written or deleted. Each alert is in one case, so each transaction gets one row.
@@ -173,24 +174,24 @@ S0 = BQ1 order with no brief. S1 = code-only brief. S2 = LLM brief.
 
 ## 11. Streamlit
 
-Owned by Person 2, not started. Contract: `docs/agent_output_format.md` (matches D31 and the code). The app must say full days end on 16 Sep 2022 and the data is synthetic. It doesn't show BQ1 reasons (D32). It reads DynamoDB, never SQS.
+Owned by Person 2, merged (PR #8). Guide: `docs/streamlit_dashboard.md`; recording runbook: `docs/handovers/STREAMLIT_LIVE_DEMO_RUNBOOK.md`; launch with `.venv/bin/streamlit run app.py` (Demo offline by default, Live batch is read-only and needs an explicit load). Contract: `docs/agent_output_format.md` (matches D31 and the code). The app must say full days end on 16 Sep 2022 and the data is synthetic. It doesn't show BQ1 reasons (D32). It reads DynamoDB, never SQS.
 
 ## 12. Milestones
 
 | # | Milestone | Owner | Status |
 |---|---|---|---|
 | 1 | Data access | Claire | Done |
-| 2 | Case grouping + S1 | Claire | Done; thresholds set (D36), freeze pending |
-| 3 | Evaluation harness | Claire | Written (`src/evaluation/`, `docs/evaluation.md`); not run, waits on the freeze |
-| 4 | LLM loop + validator | Claire | Done; ran on Bedrock for 14 Sep (F37) |
-| 5 | Batch runner, `investigate()` | Claire | Done; dry run on 14 Sep done, saved 14-16 Sep runs wait on the freeze |
-| 6 | Streamlit | Person 2 | Not started; output format is ready |
-| 7 | Full evaluation | Claire | To do; follows the saved runs |
-| 8 | New-day path, queue consumer | Claire | To do; required for the recorded run |
+| 2 | Case grouping + S1 | Claire | Done; thresholds set (D36), frozen in `e3349bc` |
+| 3 | Evaluation harness | Claire | Done; ran 8 Nov (`docs/evaluation_results.md`) |
+| 4 | LLM loop + validator | Claire | Done; ran on Bedrock for 14-16 Sep (F37, `docs/evaluation_results.md`) |
+| 5 | Batch runner, `investigate()` | Claire | Done; 14-16 Sep runs saved 8 Nov |
+| 6 | Streamlit | Person 2 | Merged (PR #8) |
+| 7 | Full evaluation | Claire | Done 8 Nov, except marking the observations by hand |
+| 8 | New-day path (state machine) | Claire | Built and deployed (D43); one end-to-end save on a new day still to do |
 
 ## 13. Evaluation (Claire, for D31)
 
-The harness is `src/evaluation/` (the only code that reads labels; a test checks that `src/agent` never imports it) and `scripts/run_evaluation.py`. Step-by-step instructions for whoever runs it: `docs/evaluation.md`. It is written and tested with fakes but has not run on real data.
+The harness is `src/evaluation/` (the only code that reads labels; a test checks that `src/agent` never imports it) and `scripts/run_evaluation.py`. Step-by-step instructions for whoever runs it: `docs/evaluation.md`. It ran on 8 Nov on the saved 14-16 Sep runs; results are in `docs/evaluation_results.md`.
 
 - **Days:** 14-16 Sep only, test rows only, top 100 alerts per day, reported per day. Every day is seen as of its own end (D28). Anything reading Gold must filter to these dates.
 - **Labels only after the freeze.** Tune without labels, freeze in a commit, then evaluate. Report any later change separately, as tuned after the results.
@@ -202,14 +203,15 @@ The harness is `src/evaluation/` (the only code that reads labels; a test checks
 - **What does the LLM add?** Compare S2 with S1 on the measures above, keeping in mind the first bullet: list the findings S2 drops that S1 keeps, and judge the summary and next checks on example briefs. If the LLM adds nothing over code, report that.
 - **Also:** cost and latency, and repeatability: run a 50-alert subset 3 times.
 - **Not measurable here:** time saved for analysts. Show example briefs instead.
+- **Results (8 Nov, `docs/evaluation_results.md`).** 237 cases: 191 valid (81%), 32 repaired (14%), 14 fallback (6%; all "still invalid after one repair", none from a failed LLM call), US$25.00 in total. The top 100 is almost all laundering (236 of 237 cases), so findings cannot be compared inside it. On the deeper S1 list (top 500, 1,259 cases, 35% laundering), `FAN_OUT` carries information beyond the BQ1 rank (83% laundering when it fires, 30% when it does not), `FAN_IN` points the other way (19% against 38%), `PASS_THROUGH` shows no lift and `MONEY_RETURNS` is too rare to judge. Against S1, S2 dropped 12 findings and added 6 (all `REPEAT_ACCOUNT_ALERTS`). Repeat runs (14 Sep, 41 cases): same findings in 97.6%. Observations are not yet judged.
 
 ## 15. Risks and open items
 
 - **Timeline:** the change touches the output format, the prompt, the validator, S1 and the evaluation. If time is short, fall back to the frozen triage version (`91e344e`).
 - **Code does most of the work:** see the first bullet of section 13. The LLM's value is the choice of findings, the summary and the next checks.
 - **Patterns file fit:** attempts may span days or accounts outside the top 100, so only some alerts will match an attempt. Check coverage before relying on it.
-- **Where the batch runs:** undecided. A Lambda that starts a Glue job doesn't fit "delete the message only on success", because a Lambda SQS trigger removes the message when the Lambda returns. Glue Python shell may also be too old, as `contracts.py` needs 3.10+ (check this). Suggested for the one recorded run: a simple poller on a laptop or small EC2 instance. CloudShell may time out when idle.
-- **Queue timing:** the visibility timeout is 15 minutes (F20), but the batch takes about 10 minutes plus the rebuild. The message can reappear mid-run and start a duplicate, so the consumer must keep extending the timeout while it works.
+- **Where the batch runs:** decided (D40, D43). Step Functions runs the rebuild and the batch as Fargate tasks, and the SQS queue and its DLQ were deleted on 8 Nov, so the queue-timing and duplicate-message worries no longer apply. Two overlapping new-day runs would still rebuild the same tables: run one day at a time.
+- **Scaling and deployment limits:** see F40.
 - **Silent fallback:** Bedrock errors and the spend cap become S1 results, not failures, so an outage could still publish as S2. Consider blocking `publish` above a set fallback rate.
 - **18 Sep run:** can happen only once, so record from the start, and rehearse the whole path first on a test message. 19 Sep (244 transactions) is the backup. It's too small and has no reasons, so it isn't a result.
 - **To confirm:** D24, D25.
@@ -227,13 +229,13 @@ The harness is `src/evaluation/` (the only code that reads labels; a test checks
 - **F14** About 2% of scored transactions are self-transfers: `amount` is null, with no graph.
 - **F16** All of each day's top 5,000 have reasons on 14-16 Sep.
 - **F18** Later days are tiny: 17 Sep 380 scores (committed), 18 Sep 353, 19 Sep 244, down to 1-16 a day by 23-27 Sep. Committed days can't rerun, and the next loadable day is 18 Sep.
-- **F20** `is459-etl-v2-day-ready`: raw event, 15-minute visibility, dead-letter queue after 5 receives. The day is in `json.loads(detail.input)["day"]`.
+- **F20** The ETL's success event on rule `is459-etl-v2-day-succeeded` carries the day in `json.loads(detail.input)["day"]`; the state machine reads it from there (D40). The SQS queue `is459-etl-v2-day-ready` that once received it was deleted on 8 Nov.
 - **F21** `is459_rt_alerts` (key `txn`) has no reasons, and `amount` is a string. `is459_rt_briefs` (key `txn`) holds the narrative, next checks and typology. Typology macro-F1 is 0.345, so don't lean on it.
 - **F22** New days have `data_split = 'excluded'`, but `v_agent_scores` ranks only `test` rows, so a new day has an empty queue until fixed (step 6).
 - **F23** New days have no reasons.
 - **F24** `is459-agent-readonly` misses the agent tables, S3 `agent/`, `is459_agent_cases`, `BatchGetItem` and Bedrock, and allows labelled tables. Irrelevant while running as `g1team5`.
 - **F28** `investigate()` on a single alert sets `case_id` to null, and its result can differ from the batch's, where the same alert may sit in a case. The app must not assume a `case_id`.
-- **F29** DynamoDB and S3 hold an out-of-date 14 Sep run (`batch-2022-09-14-20261107T034826Z`) with old verdict names and no cutoff. Don't use it. The next saved 14 Sep run replaces it.
+- **F29** *Resolved 8 Nov.* An out-of-date 14 Sep triage run (`batch-2022-09-14-20261107T034826Z`, old verdict names, no cutoff) was in DynamoDB and S3. The 8 Nov runs (Sonnet 4.6) replaced it; DynamoDB now holds only `batch-2022-09-1{4,5,6}-20261108T020412Z`.
 - **F33** Final triage dry run on 14 Sep, frozen rules, not saved: 78 cases (100 alerts), raise 42, not_sure 36, dont_raise 0. Valid 72, repaired 6, fallback 0. Raise rates are nearly flat across the top 100. US$4.12, 2.06 GB Athena. Local copy, in a temporary folder that may disappear: `/private/tmp/claude-501/-Users-claire-big-data-bq1-repo/77926439-18a2-424e-a652-47c5a6dabd0a/scratchpad/batch_0914_dry2.json`.
 - **F34** What the triage runs showed (no labels used):
   - **The verdict mostly repeats BQ1.** Two of the three signals behind `raise` are BQ1 scores: high-ranked neighbours and repeat alerts. Only the fast chain is new evidence from BQ2.
@@ -244,7 +246,13 @@ The harness is `src/evaluation/` (the only code that reads labels; a test checks
 - **F36** Thresholds basis (8 Nov, no labels): 690 alerts on 14-16 Sep, being the top 100 of each day (300), ranks 101-5,000 (183) and ordinary alerts (207). Counterparties in the window: top-100 median 1 and 90th percentile 6; 18% of top-100 senders and 13% of receivers have 5 or more, against 1% of ordinary receivers (99th percentile 4). 16% of ordinary senders pay 20 or more accounts (payment hubs, some over 20,000); no top-100 sender does (maximum about 15). Fastest onward gap, where there is one: median 3.4 h in the top 100 and 4.4 h in ordinary alerts. Half the alert amount going on within 6 h: 13% of top-100 alerts and 15% of ordinary ones, so `PASS_THROUGH` does not separate top alerts from ordinary ones, and the share can be far above 1 for a busy receiver (340 times in one case). Account history is 3 to 5 days everywhere, so `SHORT_HISTORY` never fires. 15% of top-100 alerts have under 6 h observed.
 - **F37** 14 Sep runs on real data (8 Nov, not saved; local files in `runs/`, which is not committed). S1: 78 cases, 39 with a finding (`REPEAT_ACCOUNT_ALERTS` 29, `NEIGHBOURS_HIGH_RISK` 29, `FAN_OUT` 16, `FAN_IN` 7, `PASS_THROUGH` 1, `MONEY_RETURNS` 0), 26.6 min, 6.4 GB. S2 dry run with `--spend-cap 20`: valid 64 (82%), repaired 12 (15%), fallback 2 (2.6%), no errors; 150 observations in 73 cases, 10 dropped; US$10.93 (US$0.14 a case), 17 min, 6.1 GB; steps mean 4.4, maximum 8. S2 added no finding to S1's and dropped one `NEIGHBOURS_HIGH_RISK`, so for findings the LLM adds nothing over code and its value is the summary, next checks and observations. The first dry run (cap US$10) had 12% fallback, six of them from the cap, and one case lost to a transient Athena error (D38). Remaining repair reasons: `FAN_OUT` claimed without support (7), `RECHECK_AFTER_MORE_DATA` without its gap (5, was 13 before the prompt line), `PASS_THROUGH` claimed without support (3).
 - **F38** `NO_GRAPH_AVAILABLE` was on 18 of 78 cases on 14 Sep. For 13 of them no payment goes into the sender or out of the receiver even without the end-of-day cutoff; for 5 the receiver's onward payments exist but came after midnight, so D28 hides them. The accounts often have other activity, which `get_account_activity` sees (7 of the 18 still had findings such as `FAN_OUT`), so the gap text now says "no payments into the sender or out of the receiver". `PASS_THROUGH` needs an upstream payment in the alert's own currency: on 14 Sep, 5 of 6 top-100 alerts that met the gap and share rules had inflows only in another currency. Cross-currency alerts are otherwise not an issue (0 of the top 500 a day).
-- **F39** First run through the Fargate state machine (8 Nov, 14 Sep): event to saved result in 14.5 min, 100 decision rows, 78 cases, 78 traces written. But 29 of 78 cases fell back, 26 of them from Bedrock `ThrottlingException: Too many tokens per day`: the account's daily token quota for Sonnet 4.5 was used up by the day's earlier runs (about US$30 to 35 of estimated spend, roughly 9 to 10 million input tokens). The 14 Sep rows in DynamoDB are therefore mostly fallback briefs and must be rerun; the evaluation is not affected, because it uses its own S1 and S2 files. Three full days need about three times that, so run them on separate days or ask for a higher quota in Service Quotas. The state machine had one bug, fixed: `StringMatches` supports only `*`, not `?`.
+- **F39** First run through the Fargate state machine (8 Nov, 14 Sep): event to saved result in 14.5 min, 100 decision rows, 78 cases, 78 traces written. But 29 of 78 cases fell back, 26 of them from Bedrock `ThrottlingException: Too many tokens per day`: the account's daily token quota for Sonnet 4.5 was used up by the day's earlier runs (about US$30 to 35 of estimated spend, roughly 9 to 10 million input tokens). The 14 Sep rows in DynamoDB were therefore mostly fallback briefs; the evaluation was not affected, because it uses its own S1 and S2 files. Sonnet 4.5's quota is 27M a day and cannot be raised, so the team moved to Sonnet 4.6 (D42) and replaced the rows on 8 Nov. Quotas are per model and reset about 24 h after use. The state machine had one bug, fixed: `StringMatches` supports only `*`, not `?`.
+- **F40** Scaling and deployment, read from the code, the plan, the ETL handover and AWS on 8 Nov; nothing was load-tested.
+  - **Agent work is bounded by the top 100 a day** (77 to 82 cases, US$8 to 9), not by transaction volume. The tools cap what goes to the LLM (D10, `AGENT_MAX_NEIGHBOUR_IDS`).
+  - **Agent tables are partitioned by `txn_date`; two are also bucketed.** Checked with `SHOW CREATE TABLE`: `agent_scores_v2` and `agent_edges_v2` have 32 Hive buckets (by `transaction_id` and `account_key`), `agent_day_queue_v2` has none. Athena cannot insert into bucketed tables, so a new day rebuilds them (about 2.7 GB scanned, D15), and that cost grows with the number of days. Gold and agent tables are Hive Parquet; Iceberg is used only in the ETL's Silver layer (`is459_aml_silver_v2`).
+  - **The ETL is built for LI-Medium.** The audit job reads the whole `LI-Medium_Trans.csv` (about 3 GB) every day and numbers every line before keeping the day, so a day's cost grows with the file size. The BQ1 parity check needs v1 output, which exists only for 1 to 27 Sep. The model is frozen and was trained on Medium. A larger dataset needs new source keys and table names, a replacement for the parity check, and a re-evaluation (`ETL_v2_Handover.docx`).
+  - **More parallelism is not free.** `publish` assumes one process owns the day; the spend cap is per process; Bedrock tokens and Athena concurrent queries are account-wide; the new-day rebuild is one day at a time.
+  - **Deployment is scripted, not infrastructure-as-code:** `infra/deploy.sh` (AWS CLI, has `DRY_RUN=1`, hard-coded account and region, default VPC) and `destroy.sh`, all tagged `project=is459-g1t5-etl-v2`. The ETL's Glue jobs were deployed from CloudShell and are not in this repo.
 
 ## 17. Decisions in force
 
@@ -254,7 +262,7 @@ The harness is `src/evaluation/` (the only code that reads labels; a test checks
 | D3 | `AGENT_*` config constants are separate from v1's. `BQ1_SCORE_TABLE` stays for `src/bq1`. |
 | D4 | No separate IAM role for labels; rule 2's controls apply instead. |
 | D5 | Reasons come from Owen's CSV, valid for the 14-16 Sep top 1%. |
-| D6 | `risk_rank_day` ranks test rows only (step 6 extends it to new days). |
+| D6 | `risk_rank_day` ranks test rows only (D43 extends it to new days). |
 | D7 | Neighbours outside the scored days are `scored: false`, with no v1 fallback. |
 | D8, D13 | Tools read three materialised agent tables, not the views. |
 | D10 | At most 50 edges per direction go to the LLM; totals use all edges. |
@@ -283,9 +291,9 @@ The harness is `src/evaluation/` (the only code that reads labels; a test checks
 | D37 | *8 Nov.* S1 now sends every payment listed by the graph and by account activity to `get_neighbour_scores` (up to `AGENT_MAX_NEIGHBOUR_IDS`), as the `NEIGHBOURS_HIGH_RISK` rule counts them. Before, it scored only graph payments and found 6 cases against the LLM's 28; now 29 against 28. |
 | D38 | *8 Nov.* The Athena runner retries a query that fails with an "internal error" up to 3 times, because one such failure stopped a whole day's save. Final runs use `--spend-cap 20`, because a day costs about US$11. |
 | D39 | *8 Nov.* Wording and naming: the money-flow field `onward_share` is now `quick_onward_share`, because it counts only payments within the pass-through gap; the `NO_GRAPH_AVAILABLE` text and prompt say "no payments into the sender or out of the receiver"; the prompt tells the model the exact next-check conditions and not to spell out numbers. |
-| D40 | *8 Nov.* The batch is triggered without a polling script: a second target `agent-batch` on the ETL's rule `is459-etl-v2-day-succeeded` (ETL owner agreed) starts the Step Functions state machine `is459-agent-batch`, which reads the day from `detail.input` and runs `scripts.run_batch --day <day> --spend-cap 20 --save` as a Fargate task. A failure sends an SNS email. Everything is in `infra/` (Dockerfile, task and state machine definitions, IAM policies, `deploy.sh`, `destroy.sh`), tagged `project=is459-g1t5-etl-v2`. The container's role can read only the label-free agent tables, so it cannot reach labels. The old target `agent-queue` (SQS `is459-etl-v2-day-ready`) is still on the rule and nothing reads it; remove the target and then the queue and its DLQ when convenient. |
+| D40 | *8 Nov.* The batch is triggered without a polling script: a second target `agent-batch` on the ETL's rule `is459-etl-v2-day-succeeded` (ETL owner agreed) starts the Step Functions state machine `is459-agent-batch`, which reads the day from `detail.input` and runs `scripts.run_batch --day <day> --spend-cap 20 --save` as a Fargate task. A failure sends an SNS email. Everything is in `infra/` (Dockerfile, task and state machine definitions, IAM policies, `deploy.sh`, `destroy.sh`), tagged `project=is459-g1t5-etl-v2`. The container's role can read only the label-free agent tables, so it cannot reach labels. The old target `agent-queue` and the SQS queue `is459-etl-v2-day-ready` with its DLQ were removed on 8 Nov (both queues were empty and nothing in the repo read them); the rule now has only `agent-batch`. |
 | D41 | *8 Nov, after the freeze, outside `src/`.* `scripts/run_batch.py` refuses `--save` when any case fell back because the LLM could not be used (a failed call such as a quota error, or the spend cap), unless `--allow-llm-failures` is passed. It changes no brief, finding or threshold. |
-| D42 | *8 Nov, agreed with the team.* The agent moves from Sonnet 4.5 to Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`, same list price) because Sonnet 4.5's daily token quota (27M, not adjustable) blocks running three days of evaluation (F39). No prompt, finding rule or threshold changes. A 10-alert dry run on 14 Sep: 9 valid, 1 repaired, 0 fallback, US$0.10 a case. `infra/iam/task-role-policy.json` now allows Sonnet 4.6; the deployed role and image still need `deploy.sh` (or the policy update alone, plus `--model` in the state machine) before the Fargate trigger can use it. The evaluation runs for 14 to 16 Sep were made from CloudShell with `--model us.anthropic.claude-sonnet-4-6`. |
+| D42 | *8 Nov, agreed with the team.* The agent moves from Sonnet 4.5 to Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`, same list price) because Sonnet 4.5's daily token quota (27M, not adjustable) blocks running three days of evaluation (F39). No prompt, finding rule or threshold changes. A 10-alert dry run on 14 Sep: 9 valid, 1 repaired, 0 fallback, US$0.10 a case. The evaluation runs for 14 to 16 Sep were made from CloudShell with `--model us.anthropic.claude-sonnet-4-6`. The committed `AGENT_MODEL_ID` is now Sonnet 4.6, and the deployment is current (checked in AWS on 8 Nov: image pushed 10:57, after the last code commit; task role allows Sonnet 4.6; the state machine does not pass `--model`, so the image default applies). |
 | D43 | *8 Nov.* New-day path. `AGENT_LAST_DAY` (environment) sets the last day in the agent tables and `AGENT_SCORED_DATES`/`AGENT_DATA_HORIZON` follow it; default 16 Sep, so the evaluated runs are unchanged. `v_agent_scores` now ranks `excluded` rows per day too (F22): 14-16 Sep ranks unchanged, 17 Sep gets 1-380. The state machine runs a `RebuildTables` Fargate step before `RunBatch`, under a separate role `is459-agent-rebuild-role` that can read Gold (which holds the label column) and write `agent/tables/`; the batch keeps the label-free role. `rebuild_tables.py` does nothing if the tables already hold every day up to `AGENT_LAST_DAY`, and refuses to drop a later day, so a replayed event never shrinks the tables. One day at a time: two overlapping new-day runs would rebuild the same tables. |
 | D33 | One hop only. BQ2 is defined as one hop (6-72 h) and only that is evaluated, so the agent doesn't follow a counterparty's own payments. A second hop would be new analysis, not BQ2 output. |
 
@@ -296,19 +304,20 @@ The harness is `src/evaluation/` (the only code that reads labels; a test checks
 ## 19. Remaining agent work (Claire)
 
 **Step 4: Batch runner and `investigate()` (milestone 5), built**
-- `src/agent/batch.py` (`run_day` computes, `publish` saves), `store.py` (DynamoDB and S3), `investigate.py`, and `report.py`. CLIs: `scripts/run_batch.py --day <day> [--save]` (dry run unless `--save`), `create_agent_cases_table.py`, `rebuild_tables.py` (dry run unless `--yes`; refuses to delete outside `agent/tables/`, and fails if a day's ranks changed). Concurrency of 4, on a shared cache that is thread-safe.
+- `src/agent/batch.py` (`run_day` computes, `publish` saves), `store.py` (DynamoDB and S3), `investigate.py`, and `report.py`. CLIs: `scripts/run_batch.py --day <day> [--save]` (dry run unless `--save`), `create_agent_cases_table.py`, `rebuild_tables.py` (dry run unless `--yes`; refuses to delete outside `agent/tables/`, fails if a day's ranks changed, and since D43 does nothing if the tables already hold the day). Concurrency of 4, on a shared cache that is thread-safe.
 - Checked with in-memory stores, and `publish` against the real tables with a fake day (`2099-01-01`): reruns replace exactly the day's rows.
-- Not done: `investigate()` has no save option (a save would overwrite the batch row for that alert). `rebuild_tables.py --yes` has not been run for real.
+- Not done: `investigate()` has no save option (a save would overwrite the batch row for that alert). `rebuild_tables.py --yes` was run for real on 8 Nov for 17 Sep (14-16 Sep ranks unchanged, 17 Sep ranked 1-380).
 
-**Step 5: Investigation brief (D31), built 7 Nov.** `contracts.py`, `evidence.py`, `findings.py`, `brief.py`, `validate.py`, `prompts.py`, `loop.py`, `baseline.py`, `decisions.py`, `review_list.py`, `report.py`, `sample_results.py` and the tools in 5.3 are done, with `claims.py` replaced by `brief.py`. Smoke test, thresholds and the 14 Sep S1 and S2 runs are done (F36, F37). What remains is the freeze, then 14-16 Sep with `--save` ("Where to continue").
+**Step 5: Investigation brief (D31), built 7 Nov.** `contracts.py`, `evidence.py`, `findings.py`, `brief.py`, `validate.py`, `prompts.py`, `loop.py`, `baseline.py`, `decisions.py`, `review_list.py`, `report.py`, `sample_results.py` and the tools in 5.3 are done, with `claims.py` replaced by `brief.py`. Smoke test, thresholds and the 14 Sep S1 and S2 runs are done (F36, F37). Frozen in `e3349bc` and `8cba880`; the 14-16 Sep runs were saved and evaluated on 8 Nov (`docs/evaluation_results.md`).
 
 **Step 6: New-day path (milestone 8)**
 - Rank `excluded` rows too (F22), and check that 14-16 Sep ranks stay identical.
 - Widen `sql/agent/04-06`, `AGENT_SCORED_DATES` and `AGENT_DATA_HORIZON`.
 - Built 8 Nov (D43): the state machine rebuilds the agent tables for the new day before the batch.
 - New days have no BQ1 reasons (F23), which no longer matters because the agent never reads them. Test with a fake message.
-- Done when a test event for a new day starts the state machine and a brief is saved with no manual step. Don't start until the 14-16 Sep evaluation is finished, because this changes files the evaluated runs depend on.
+- Tested 8 Nov on 17 Sep: a forced rebuild under the rebuild role, then the whole state machine from a fake 17 Sep event. The rebuild step correctly did nothing and the batch briefed cases on Sonnet 4.6 until the daily token quota ran out, so the test was stopped before saving (`infra/README.md`).
+- Done when a test event for a new day starts the state machine and a brief is saved with no manual step. Still to do once the quota is back; run new days one at a time.
 
 **Step 7: Recordings (no live demo)**
 - Record the setup pipeline and the run pipeline.
-- For the one-time 18 Sep run, be present with Person 3 and confirm the consumer is running first.
+- The saved 14-16 Sep runs can be used for the recording (Streamlit's Live batch source reads DynamoDB). D18 planned a one-time 18 Sep run: if kept, rehearse on a test event first and confirm the state machine and the quota. Avoid the on-demand Investigate button while Bedrock is out of quota.
