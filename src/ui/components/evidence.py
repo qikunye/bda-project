@@ -42,22 +42,23 @@ def resolve_evidence(result: dict, evidence_id: str, selected_member: str | None
     return EvidenceReference("unresolved")
 
 
-def select_evidence(result: dict, evidence_id: str) -> None:
-    reference = resolve_evidence(result, evidence_id, st.session_state.get("ui_batch_member"))
-    st.session_state["ui_batch_evidence"] = evidence_id
+def select_evidence(result: dict, evidence_id: str, state_prefix: str = "ui_batch") -> None:
+    reference = resolve_evidence(result, evidence_id, st.session_state.get(f"{state_prefix}_member"))
+    st.session_state[f"{state_prefix}_evidence"] = evidence_id
     if reference.kind == "graph":
-        st.session_state["ui_batch_member"] = reference.member_id
+        st.session_state[f"{state_prefix}_member"] = reference.member_id
 
 
-def render_evidence_buttons(result: dict, ids: list[str], key_prefix: str) -> None:
+def render_evidence_buttons(result: dict, ids: list[str], key_prefix: str, *, state_prefix: str = "ui_batch") -> None:
     st.caption("Supporting evidence · select a reference to inspect it")
     for index, evidence_id in enumerate(ids):
-        st.button(evidence_id, key=f"ui_evidence_{key_prefix}_{index}",
-                  on_click=select_evidence, args=(result, evidence_id))
+        widget_prefix = "ui_evidence" if state_prefix == "ui_batch" else f"{state_prefix}_evidence"
+        st.button(evidence_id, key=f"{widget_prefix}_{key_prefix}_{index}",
+                  on_click=select_evidence, args=(result, evidence_id, state_prefix))
 
 
-def render_selected_evidence(result: dict, selected_member: str) -> None:
-    evidence_id = st.session_state.get("ui_batch_evidence")
+def render_selected_evidence(result: dict, selected_member: str, *, state_prefix: str = "ui_batch") -> None:
+    evidence_id = st.session_state.get(f"{state_prefix}_evidence")
     if not evidence_id:
         return
     st.subheader("Supporting evidence")

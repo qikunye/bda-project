@@ -14,6 +14,7 @@ from src.ui.services.contracts import (
     validate_decision,
     validate_saved,
 )
+from src.ui.services.errors import ServiceFailure, describe_failure
 
 STATUS_LABELS = {
     "missing": "No saved brief",
@@ -25,10 +26,14 @@ STATUS_LABELS = {
 }
 
 
+class UnprocessedDecisionKeys(RuntimeError):
+    """The bounded DynamoDB key retries were exhausted."""
+
+
 @dataclass
 class DecisionBatch:
     rows: dict[str, dict] = field(default_factory=dict)
-    errors: dict[str, str] = field(default_factory=dict)
+    errors: dict[str, str | ServiceFailure] = field(default_factory=dict)
 
 
 @dataclass
@@ -39,6 +44,7 @@ class SavedBrief:
     run_id: str | None = None
     created_at: str | None = None
     scenario: str | None = None
+    failure: ServiceFailure | None = None
 
 
 def decision_state(txn_id: str, day: str, batch: DecisionBatch) -> tuple[str, dict | None]:
@@ -96,15 +102,17 @@ class SavedResultsReader:
                     pending = response.get("UnprocessedKeys", {}).get(
                         config.AGENT_DECISIONS_TABLE, {}
                     ).get("Keys", [])
-                except (BotoCoreError, ClientError, OSError, KeyError, TypeError):
+                except (BotoCoreError, ClientError, OSError, KeyError, TypeError) as error:
+                    failure = describe_failure(error, "Decision read")
                     for key in pending:
-                        batch.errors[key["transaction_id"]] = "Decision read failed; reload the queue."
+                        batch.errors[key["transaction_id"]] = failure
                     break
                 if not pending:
                     break
                 if attempt == self.max_retries:
+                    failure = describe_failure(UnprocessedDecisionKeys(), "Decision read")
                     for key in pending:
-                        batch.errors[key["transaction_id"]] = "Decision read remained unprocessed."
+                        batch.errors[key["transaction_id"]] = failure
                 else:
                     self.sleep(0.1 * 2 ** attempt)
         return batch
@@ -134,6 +142,15 @@ class SavedResultsReader:
     def open(self, txn_id: str, day: str, batch: DecisionBatch) -> SavedBrief:
         status, representative = decision_state(txn_id, day, batch)
         if representative is None:
+            row = batch.rows.get(txn_id, {})
+            rep_id = row.get("representative_txn_id") if isinstance(row, dict) else None
+            failure = batch.errors.get(txn_id)
+            if failure is None and isinstance(rep_id, str):
+                failure = batch.errors.get(rep_id)
+            if isinstance(failure, ServiceFailure):
+                return SavedBrief(status, failure.message, failure=failure)
+            if status == "error":
+                return SavedBrief(status, "Saved representative metadata is unavailable. Reload the queue or check batch publication.")
             return SavedBrief(status, STATUS_LABELS[status])
         try:
             case = self.read_case(day, f"case_{representative['transaction_id']}")
@@ -141,8 +158,11 @@ class SavedResultsReader:
                 return SavedBrief("error", "Saved case metadata is missing; reload the queue.")
             envelope = self.read_trace(representative["trace_key"])
             result = validate_saved(batch.rows[txn_id], representative, case, envelope)
-        except (IncompatibleResult, ValueError, TypeError, KeyError):
-            return SavedBrief("incompatible", "Saved records are incompatible or inconsistent; reload the queue.")
-        except (BotoCoreError, ClientError, OSError):
-            return SavedBrief("error", "Saved case or trace could not be read; reload the queue.")
+        except (IncompatibleResult, ValueError, TypeError, KeyError) as error:
+            failure = describe_failure(error, "Saved record validation")
+            return SavedBrief("incompatible", "Saved records are incompatible or inconsistent; reload the queue.",
+                              failure=failure)
+        except (BotoCoreError, ClientError, OSError) as error:
+            failure = describe_failure(error, "Saved case or trace read")
+            return SavedBrief("error", failure.message, failure=failure)
         return SavedBrief(status, result=result, run_id=envelope["run_id"], created_at=envelope["created_at"])

@@ -4,7 +4,9 @@ import streamlit as st
 from botocore.exceptions import BotoCoreError, ClientError
 
 from src import config
+from src.aws.athena import AthenaQueryError
 from src.ui.pages.batch import DEMO_SOURCE, batch_source, get_backend, navigate
+from src.ui.services.errors import ServiceFailure, describe_failure
 from src.ui.services.saved_results import STATUS_LABELS, SavedBrief
 
 
@@ -14,8 +16,9 @@ def open_investigation(source: str) -> None:
     entry = next(entry for entry in snapshot.entries if entry["txn_id"] == txn_id)
     try:
         saved = get_backend(source).open(snapshot, txn_id)
-    except (BotoCoreError, ClientError, OSError, ValueError, KeyError, TypeError):
-        saved = SavedBrief("error", "Saved brief could not be loaded. Reload the queue to retry.")
+    except (BotoCoreError, ClientError, OSError, ValueError, KeyError, TypeError) as error:
+        failure = describe_failure(error, "Saved brief read")
+        saved = SavedBrief("error", failure.message, failure=failure)
     if saved.status in {"error", "incompatible"}:
         entry["status"] = saved.status
         entry["Brief availability"] = STATUS_LABELS[saved.status]
@@ -49,17 +52,24 @@ def render_queue() -> None:
             st.session_state["ui_batch_snapshot"] = cached
             st.session_state.pop("ui_batch_queue_alert", None)
             st.session_state.pop("ui_batch_queue_error", None)
-        except (BotoCoreError, ClientError, OSError, ValueError, KeyError, TypeError):
-            st.session_state["ui_batch_queue_error"] = source
+        except (BotoCoreError, ClientError, AthenaQueryError, OSError, ValueError, KeyError, TypeError) as error:
+            st.session_state["ui_batch_queue_error"] = (source, describe_failure(error, "Queue load"))
             st.session_state.pop("ui_batch_snapshot", None)
             cached = None
-    if st.session_state.get("ui_batch_queue_error") == source:
+    queue_error = st.session_state.get("ui_batch_queue_error")
+    if queue_error is not None and queue_error[0] == source:
         st.error("Queue read failed. The selected data source remains active; no demo data was substituted.")
+        st.error(queue_error[1].message)
+        st.caption(f"Debug reference: {queue_error[1].reference}")
         return
     if cached is None or cached["source"] != source:
         st.info("Load a queue to begin browsing saved batch results.")
         return
     snapshot = cached["snapshot"]
+    for failure in {failure.reference: failure for failure in snapshot.decisions.errors.values()
+                    if isinstance(failure, ServiceFailure)}.values():
+        st.warning(failure.message)
+        st.caption(f"Debug reference: {failure.reference}")
     st.caption(f"Loaded {snapshot.day} · Top {snapshot.top_k} · {len(snapshot.entries)} alerts · Original BQ1 order")
     if not snapshot.entries:
         st.info("No alerts are available for this date and review selection.")
