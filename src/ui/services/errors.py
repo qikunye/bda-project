@@ -36,7 +36,7 @@ def describe_failure(error: Exception, operation: str) -> ServiceFailure:
         word in text for word in ("table_not_found", "schema_not_found", "database_not_found", "table does not exist")
     ):
         category = "Missing data table or resource"
-        advice = "Verify the configured Athena/Glue and batch-storage resources; the dashboard does not create them."
+        advice = "Verify the configured data tables and storage resources; the dashboard does not create them."
     elif code in {"throttlingexception", "provisionedthroughputexceededexception", "requestlimitexceeded",
                   "internalservererror", "serviceunavailable", "internalfailure"} or any(
         word in name for word in ("timeout", "connection", "unprocessed")
@@ -52,4 +52,4 @@ def describe_failure(error: Exception, operation: str) -> ServiceFailure:
     reference = uuid4().hex[:12]
     logging.getLogger(__name__).warning("%s failed: %s (%s, reference %s)", operation, category,
                                         type(error).__name__, reference)
-    return ServiceFailure(category, f"{category}. {advice}", reference, error)
+    return ServiceFailure(category, f"{operation}: {category}. {advice}", reference, error)

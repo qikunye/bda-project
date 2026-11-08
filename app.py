@@ -49,13 +49,13 @@ TRANSACTION_LOOKUP_MODE = "Transaction ID lookup"
 # ============================================================
 
 st.set_page_config(
-    page_title="AML Investigation Network",
+    page_title="AML Investigation Dashboard",
     layout="wide"
 )
 
 page = st.sidebar.radio(
     "Application",
-    ["Alert Queue", "Investigation", "Agent Evidence Brief (Demo)", "BQ2 Money Trail (Legacy)"],
+    ["Alert Queue", "Investigation", "Real-Time Monitoring", "Agent Evidence Brief (Demo)", "BQ2 Money Trail (Legacy)"],
     key="ui_navigation_page",
 )
 
@@ -69,6 +69,12 @@ if page == "Investigation":
     from src.ui.pages.investigation import render_investigation
 
     render_investigation()
+    st.stop()
+
+if page == "Real-Time Monitoring":
+    from src.ui.pages.realtime import render_realtime
+
+    render_realtime()
     st.stop()
 
 if page == "Agent Evidence Brief (Demo)":

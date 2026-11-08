@@ -2,6 +2,7 @@
 
 import streamlit as st
 
+from src.ui.components.notices import render_project_notices
 from src.ui.pages.agent_demo import DEMO_NOTICE
 from src.ui.services.demo import DemoBatchService
 from src.ui.services.queue import LiveBatchService
@@ -29,6 +30,7 @@ def batch_source() -> str:
     else:
         st.info("LIVE BATCH — Read-only saved data. Reads begin only when you load a queue.")
     st.caption("Data is synthetic. Full analysis days end on 16 Sep 2022. Scores are ranking signals, not probabilities.")
+    render_project_notices()
     return source
 
 
