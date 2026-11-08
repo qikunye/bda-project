@@ -94,12 +94,19 @@ The finding thresholds in `src/config.py` were set from label-free distributions
 | Agent code | Built, unit tested, and run on real data for 14 Sep (S1 and LLM) |
 | Agent batch on 14-16 Sep | To do after the freeze commit |
 | Agent evaluation | Harness written (`src/evaluation/`, [instructions](docs/evaluation.md)); to run after the batch |
-| Agent screens in Streamlit | Not started |
+| Agent screens in Streamlit | Implemented on `streamlit`; saved-case, graph/evidence, on-demand and real-time workflows verified; offline demo available |
 | Automatic trigger (EventBridge, Step Functions, Fargate) | Deployed and tested on 14 Sep; new days need the table rebuild step |
 
 ## What's in this repository
 
-This repository holds the investigation agent and the serving code around BQ1 and BQ2. These parts live elsewhere: the ETL, BQ1 training and feature engineering, the real-time path, and the Stage 5 dashboard (see its [handoff](docs/handovers/STREAMLIT_HANDOFF_OWEN.md)).
+This repository holds the investigation agent, serving code around BQ1 and BQ2,
+and the Streamlit analyst dashboard. The ETL, BQ1 training and feature engineering,
+and real-time writers live elsewhere. Use the current
+[dashboard guide](docs/streamlit_dashboard.md),
+[live-demo runbook](docs/handovers/STREAMLIT_LIVE_DEMO_RUNBOOK.md) and
+[review handoff](docs/handovers/STREAMLIT_REVIEW_READINESS.md).
+The earlier [dashboard handoff](docs/handovers/STREAMLIT_HANDOFF_OWEN.md)
+is historical context.
 
 | Path | What it is |
 |---|---|
@@ -108,6 +115,7 @@ This repository holds the investigation agent and the serving code around BQ1 an
 | `src/bq2/queries.py` | BQ2 case query, used to check that the agent's edges match it |
 | `src/bq2/evidence.py`, `transforms.py` | Structured evidence and transformations from BQ2 edges (not used by the agent) |
 | `src/aws/athena.py` | Athena execution |
+| `app.py`, `src/ui/` | Streamlit navigation, ranked queue, saved and on-demand briefs, native graphs, evidence navigation, real-time monitoring and offline samples |
 | `sql/bq1/` | Ready-made BQ1 queries |
 | `sql/agent/` | Builds the label-free agent tables |
 | `infra/` | Deploys the Fargate batch and its trigger (Dockerfile, state machine, IAM, `deploy.sh`) |
@@ -139,6 +147,9 @@ python -m pip install -r requirements.txt
 ## Commands
 
 ```bash
+# Analyst dashboard; starts in Demo (offline). Select Live explicitly for AWS reads.
+.venv/bin/streamlit run app.py
+
 # Unit tests, with no AWS access or paid calls. Bare `pytest` fails on a name clash.
 .venv/bin/python -m pytest tests
 
