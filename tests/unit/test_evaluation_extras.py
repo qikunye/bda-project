@@ -368,3 +368,16 @@ def test_run_evaluation_end_to_end_with_fakes(tmp_path, monkeypatch, capsys):
     assert summarise_evaluation.main() == 0
     text = md.read_text()
     assert "## 2022-09-14" in text and "Example briefs" in text and "Fallback" in text
+
+
+def test_same_rules_agree_flags_a_changed_case():
+    a = CaseOutcome("c1", ("t1",), frozenset({"FAN_OUT", "NEIGHBOURS_HIGH_RISK"}))
+    b = CaseOutcome("c2", ("t2",), frozenset())
+    deep = [
+        CaseOutcome("c1", ("t1",), frozenset({"FAN_OUT"})),
+        CaseOutcome("c2", ("t2",), frozenset()),
+        CaseOutcome("c3", ("t3",), frozenset({"FAN_IN"})),
+    ]
+    out = metrics.same_rules_agree([a, b], deep)
+    assert out == {"cases_in_both": 2, "differ": 1, "first_differ": ["c1"]}
+    assert metrics.same_rules_agree([b], deep)["differ"] == 0

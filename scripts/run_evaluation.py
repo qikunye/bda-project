@@ -81,6 +81,13 @@ def main() -> int:
 
     s1, s2 = load_run(args.s1), load_run(args.s2)
     deep = load_run(args.s1_deep) if args.s1_deep else []
+    if deep:
+        agree = metrics.same_rules_agree(s1, deep)
+        if agree["differ"]:
+            raise SystemExit(
+                f"--s1-deep disagrees with --s1 on {agree['differ']} of {agree['cases_in_both']} shared "
+                f"cases (first: {agree['first_differ']}). S1 is deterministic, so rerun the deeper list."
+            )
     report: dict = {"day": args.day, "reliability_s2": metrics.reliability(s2)}
     report["cost_latency_s2"] = metrics.cost_latency(s2, config.AGENT_PRICE_USD_PER_M_TOKENS)
     report["s2_vs_s1"] = metrics.compare_runs(s1, s2)
@@ -101,6 +108,7 @@ def main() -> int:
     if deep:
         report["s1_deep"] = {
             "cases": len(deep),
+            "agrees_with_s1": agree,
             "code_rates": metrics.code_rates(deep, labels),
             # Rank bands 1-100, 101-250, 251+ from each case's BQ1 day rank.
             "bq1_derived_by_rank_band": metrics.banded_code_rates(deep, labels, bands_for(deep)),
