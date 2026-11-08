@@ -47,7 +47,10 @@ Select **Live batch (read-only)** and explicitly choose **Load / refresh queue**
 Selecting the source alone makes no AWS calls. Bounded AWS verification on
 8 November 2026 loaded five real queue rows, compatible decision metadata and one
 saved case/trace. See the [verification report](handovers/STREAMLIT_AWS_VERIFICATION.md)
-for query costs, sampled coverage and remaining browser/agent execution limits.
+for query costs, sampled coverage, successful Chrome and on-demand verification,
+and remaining limitations. Use the [live-demo runbook](handovers/STREAMLIT_LIVE_DEMO_RUNBOOK.md)
+for the final presentation and the [review handoff](handovers/STREAMLIT_REVIEW_READINESS.md)
+for completion status and offline regression results.
 
 The queue reuses `tools.load_day_queue` and `AgentData`, reads decision metadata
 by key, and fetches representatives outside the visible slice when necessary.
@@ -130,7 +133,11 @@ viewer.
 
 The legacy BQ2 submit action retains its original Athena behavior. No SQS reads,
 DynamoDB writes, ETL triggers or real-time pipeline execution have been added.
-Bounded live reads succeeded; live on-demand inference was deliberately not run.
+Bounded live reads and exactly one separately approved live on-demand investigation
+succeeded. That approval is consumed; do not execute another investigation for a
+presentation without new approval. Historical measurements are in the verification
+report. The result is retained only in its original Streamlit session; use the
+report or clearly labelled offline samples if that session is unavailable.
 
 On-demand permissions additionally require Bedrock model invocation for the
 configured `AGENT_MODEL_ID` and the agent's label-free Athena/Glue/S3 access.
