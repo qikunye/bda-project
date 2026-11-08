@@ -85,8 +85,8 @@ def main() -> int:
         agree = metrics.same_rules_agree(s1, deep)
         if agree["differ"]:
             raise SystemExit(
-                f"--s1-deep disagrees with --s1 on {agree['differ']} of {agree['cases_in_both']} shared "
-                f"cases (first: {agree['first_differ']}). S1 is deterministic, so rerun the deeper list."
+                f"--s1-deep disagrees with --s1 on {agree['differ']} of {agree['same_members']} cases with "
+                f"the same members (first: {agree['first_differ']}). S1 is deterministic, so rerun the deeper list."
             )
     report: dict = {"day": args.day, "reliability_s2": metrics.reliability(s2)}
     report["cost_latency_s2"] = metrics.cost_latency(s2, config.AGENT_PRICE_USD_PER_M_TOKENS)
@@ -110,8 +110,10 @@ def main() -> int:
             "cases": len(deep),
             "agrees_with_s1": agree,
             "code_rates": metrics.code_rates(deep, labels),
-            # Rank bands 1-100, 101-250, 251+ from each case's BQ1 day rank.
-            "bq1_derived_by_rank_band": metrics.banded_code_rates(deep, labels, bands_for(deep)),
+            # Rank bands 1-100, 101-250, 251+ from each case's BQ1 day rank. Payment codes only:
+            # NEIGHBOURS_HIGH_RISK and REPEAT_ACCOUNT_ALERTS count top-K alerts outside the case,
+            # and a top-500 queue pulls those alerts into the case, so on the deeper list they
+            # measure queue depth, not risk. Their rates come from the top-100 S1 above.
             "payment_codes_by_rank_band": metrics.banded_code_rates(
                 deep, labels, bands_for(deep), codes=PAYMENT_CODES
             ),

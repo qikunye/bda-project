@@ -349,7 +349,9 @@ def test_run_evaluation_end_to_end_with_fakes(tmp_path, monkeypatch, capsys):
     report = json.loads(out.read_text())
     assert report["labels_found"] == {"alerts": 3, "with_label": 3, "positives": 1}
     assert report["cost_latency_s2"]["cases"] == 2
-    deep_bands = report["s1_deep"]["bq1_derived_by_rank_band"]["REPEAT_ACCOUNT_ALERTS"]
+    assert "bq1_derived_by_rank_band" not in report["s1_deep"]
+    assert report["s1_deep"]["agrees_with_s1"]["differ"] == 0
+    deep_bands = report["s1_deep"]["payment_codes_by_rank_band"]["FAN_OUT"]
     assert set(deep_bands) == {"1-100", "251+"}
     assert report["s1_deep"]["code_rates"]["FAN_OUT"]["with"]["positives"] == 1
     md = tmp_path / "summary.md"
@@ -370,14 +372,18 @@ def test_run_evaluation_end_to_end_with_fakes(tmp_path, monkeypatch, capsys):
     assert "## 2022-09-14" in text and "Example briefs" in text and "Fallback" in text
 
 
-def test_same_rules_agree_flags_a_changed_case():
-    a = CaseOutcome("c1", ("t1",), frozenset({"FAN_OUT", "NEIGHBOURS_HIGH_RISK"}))
-    b = CaseOutcome("c2", ("t2",), frozenset())
+def test_same_rules_agree_compares_only_unchanged_cases():
+    s1 = [
+        CaseOutcome("c1", ("t1",), frozenset({"FAN_OUT", "NEIGHBOURS_HIGH_RISK"})),
+        CaseOutcome("c2", ("t2",), frozenset({"FAN_IN"})),
+        CaseOutcome("c4", ("t4",), frozenset()),
+    ]
     deep = [
-        CaseOutcome("c1", ("t1",), frozenset({"FAN_OUT"})),
-        CaseOutcome("c2", ("t2",), frozenset()),
+        CaseOutcome("c1", ("t1", "t9"), frozenset({"FAN_OUT"})),  # Grew: not compared.
+        CaseOutcome("c2", ("t2",), frozenset()),  # Same members, different findings.
+        CaseOutcome("c4", ("t4",), frozenset()),
         CaseOutcome("c3", ("t3",), frozenset({"FAN_IN"})),
     ]
-    out = metrics.same_rules_agree([a, b], deep)
-    assert out == {"cases_in_both": 2, "differ": 1, "first_differ": ["c1"]}
-    assert metrics.same_rules_agree([b], deep)["differ"] == 0
+    out = metrics.same_rules_agree(s1, deep)
+    assert out == {"cases_in_both": 3, "same_members": 2, "differ": 1, "first_differ": ["c2"]}
+    assert metrics.same_rules_agree(s1[2:], deep)["differ"] == 0
