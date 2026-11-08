@@ -57,7 +57,9 @@ AGENT_MIN_HOURS_OBSERVED = AGENT_PASS_THROUGH_MAX_GAP_MIN / 60
 AGENT_MAX_EVIDENCE_IDS = 50  # IDs one finding may cite.
 
 # The model the agent uses. Anthropic access was denied on 21 Oct and worked on 6 Nov.
-AGENT_MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+# Sonnet 4.6 since 8 Nov: Sonnet 4.5 has a fixed 27M tokens/day quota that the evaluation
+# runs hit on 7 Nov (PLAN F39). Same list price. Agreed with the team for the demo.
+AGENT_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 # The LLM loop. Every run is bounded by steps, tokens and time, and every
 # process by a spend cap. The spend figures are estimates from list prices, not the bill.
@@ -67,7 +69,7 @@ AGENT_MAX_OUTPUT_TOKENS = 1500  # Per LLM reply.
 AGENT_RUN_TOKEN_CAP = 120_000  # Input plus output tokens over one run.
 AGENT_RUN_TIMEOUT_S = 150  # Checked before each LLM reply.
 AGENT_SPEND_CAP_USD = 10.0  # Estimated spend per process, shared by all runs in it.
-# USD per million (input, output) tokens: Sonnet 4.5 list price. Used for any model, so it
+# USD per million (input, output) tokens: Sonnet 4.5/4.6 list price. Used for any model, so it
 # over-estimates cheaper ones. Check the Bedrock pricing page before relying on it.
 AGENT_PRICE_USD_PER_M_TOKENS = (3.0, 15.0)
 AGENT_SUMMARY_MAX_CHARS = 200

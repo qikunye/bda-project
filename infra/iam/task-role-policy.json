@@ -21,6 +21,6 @@
      "Resource": ["arn:aws:dynamodb:us-east-1:__ACCOUNT_ID__:table/is459_agent_decisions","arn:aws:dynamodb:us-east-1:__ACCOUNT_ID__:table/is459_agent_decisions/index/*","arn:aws:dynamodb:us-east-1:__ACCOUNT_ID__:table/is459_agent_cases","arn:aws:dynamodb:us-east-1:__ACCOUNT_ID__:table/is459_agent_cases/index/*"]},
     {"Sid": "Claude", "Effect": "Allow",
      "Action": ["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],
-     "Resource": ["arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0","arn:aws:bedrock:us-east-1:__ACCOUNT_ID__:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0"]}
+     "Resource": ["arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0","arn:aws:bedrock:us-east-1:__ACCOUNT_ID__:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0","arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6","arn:aws:bedrock:us-east-1:__ACCOUNT_ID__:inference-profile/us.anthropic.claude-sonnet-4-6"]}
   ]
 }
