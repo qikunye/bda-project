@@ -1,5 +1,7 @@
 """Render supplied evidence briefs; no retrieval, agent execution or analytical rules."""
 
+from collections.abc import Callable
+
 import streamlit as st
 
 from src.agent.contracts import Alert, InvestigateResult, MemberMoneyFlow
@@ -59,7 +61,7 @@ def render_selected_alert(alert: Alert, window_h: int) -> None:
         st.caption("The BQ1 score is a ranking signal, not a laundering probability.")
 
 
-def render_findings(result: InvestigateResult) -> None:
+def render_findings(result: InvestigateResult, evidence_renderer: Callable | None = None) -> None:
     grouped = len(result["members"]) > 1
     st.subheader("Validated findings")
     scope = "Overall case" if grouped else "Selected alert"
@@ -68,11 +70,14 @@ def render_findings(result: InvestigateResult) -> None:
         st.info("These findings belong to the overall case, not necessarily the selected member.")
     if not result["findings"]:
         st.info("No supported finding was identified in the available evidence.")
-    for finding in result["findings"]:
+    for index, finding in enumerate(result["findings"]):
         with st.container(border=True):
             st.markdown(f"**{finding['code'].replace('_', ' ').capitalize()}**")
             st.write(finding["sentence"])
-            _references(finding["evidence_ids"])
+            if evidence_renderer is None:
+                _references(finding["evidence_ids"])
+            else:
+                evidence_renderer(finding["evidence_ids"], f"finding_{index}")
     st.caption("Findings are evidence for review, not proof of laundering.")
 
 
@@ -151,7 +156,10 @@ def render_provenance(result: InvestigateResult) -> None:
                 st.json(step["result"])
 
 
-def render_agent_brief(result: InvestigateResult, *, selected_txn_id: str | None = None) -> None:
+def render_agent_brief(
+    result: InvestigateResult, *, selected_txn_id: str | None = None,
+    show_alert: bool = True, evidence_renderer: Callable | None = None,
+) -> None:
     """Present an existing result and a member's metrics without changing either."""
 
     if result["status"] == "not_found":
@@ -166,11 +174,12 @@ def render_agent_brief(result: InvestigateResult, *, selected_txn_id: str | None
     if member is None:
         st.warning("The selected transaction is not a member of this result.")
         return
-    render_selected_alert(member["alert"], result["window_h"])
+    if show_alert:
+        render_selected_alert(member["alert"], result["window_h"])
     st.subheader("Agent evidence brief")
     if result["summary"]:
         st.write(result["summary"])
-    render_findings(result)
+    render_findings(result, evidence_renderer)
     render_gaps_and_checks(result)
     render_observations(result)
     st.divider()

@@ -55,9 +55,21 @@ st.set_page_config(
 
 page = st.sidebar.radio(
     "Application",
-    ["BQ2 Money Trail (Legacy)", "Agent Evidence Brief (Demo)"],
+    ["Alert Queue", "Investigation", "Agent Evidence Brief (Demo)", "BQ2 Money Trail (Legacy)"],
     key="ui_navigation_page",
 )
+
+if page == "Alert Queue":
+    from src.ui.pages.queue import render_queue
+
+    render_queue()
+    st.stop()
+
+if page == "Investigation":
+    from src.ui.pages.investigation import render_investigation
+
+    render_investigation()
+    st.stop()
 
 if page == "Agent Evidence Brief (Demo)":
     from src.ui.pages.agent_demo import render_agent_demo
