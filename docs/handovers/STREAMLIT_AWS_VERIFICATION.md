@@ -6,7 +6,7 @@
 **Outcome:** bounded AWS read verification succeeded after the user refreshed login.
 At the Prompt 7 boundary, browser and live on-demand execution were untested.
 The Prompt 8 section below records subsequent actual Chrome verification and the
-remaining explicit approval boundary for one on-demand run. This is a sampled
+subsequent explicitly approved on-demand run. This is a sampled
 integration check, not a pipeline health assessment.
 
 ## Identity and Git
@@ -236,7 +236,7 @@ screenshots, response data, instrumentation and known real-time IDs remain under
 `/private/tmp/bda-streamlit-prompt8/` or the previous private temporary directory,
 outside Git.
 
-### Prepared invocation — not executed
+### Prepared invocation — before approval
 
 Proposed request, through the existing Streamlit button after explicit approval:
 
@@ -297,14 +297,111 @@ code will remain unchanged. No second investigation or failure-driven resubmissi
 is authorised. A provider failure must be recorded and stop the test; an existing
 backend code-only fallback must be labelled accurately if returned.
 
-**Awaiting explicit user approval for exactly this one investigation.** The
-current browser session remains read-guarded with Bedrock runtime blocked. No
-`investigate()` call or real on-demand result exists yet.
+**At this checkpoint, explicit approval was pending and no investigation had
+run.** The subsequent approved-execution section below supersedes that state.
 
 ### Regression status
 
 Full unit/UI suite: **753 passed**; UI Ruff and dependency checks passed. The same
 14 repository-wide Ruff findings remain in files unchanged from `36019e9`.
-Whitespace checks passed. No code fix required a new regression test. Remaining
-limits are the unapproved on-demand execution, runtime model access, actual
-on-demand token/latency/scan metrics and unsampled live missing/fallback states.
+Whitespace checks passed. No code fix required a new regression test. At this
+checkpoint, on-demand execution/runtime access and its measurements were still
+unverified; the next section records their verification. Unsampled live
+missing/fallback states remain a limitation.
+
+
+### One approved live investigation — completed
+
+The user explicitly approved the proposed request with **“yes i approve”**.
+On 8 November 2026, exactly one on-demand investigation was submitted using the
+existing app's **Run Agent Investigation** button for
+`txn_613ac569efe8fc2e024adfbeae71b746`, `2022-09-14`, window **48 hours**.
+No second investigation or resubmission occurred.
+
+A separate local test process on port 8503 rendered the unchanged repository
+`app.py` through a private wrapper. It preserved the original UI, OnDemandService,
+agent, model, prompts and analytical safeguards. Process-scoped instrumentation:
+
+- Set SDK `total_max_attempts=1`, preserving other client settings including the
+  model read timeout, and set the Athena runner's internal attempt count to one.
+- Required the exact approved request and created an exclusive durable marker
+  before calling the original service, blocking a second investigation.
+- Allowed Bedrock Converse only during that call, with the configured model and
+  1,500-token reply limit; enforced at most nine turns.
+- Allowed only Athena operations during agent execution, blocking writes, scans,
+  session/pipeline operations and any unrelated service access.
+
+These controls live outside Git and do not modify production retry code or
+backend decisions. The wrapper made no substitute model/data responses. The
+cost acknowledgement was visibly required and checked before the single button
+click. One refreshed Live top-five queue and one saved case/trace read prepared
+this new browser session; these are counted separately below. STS succeeded
+again without displaying identifiers.
+
+| Actual result | Value |
+|---|---|
+| Status | `ok` |
+| Model | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| Validation | `valid`; repair_used false; fallback false |
+| Agent turns / Converse operations | **3 / 3** |
+| Input / output tokens | **17,500 / 2,018** |
+| Backend latency / measured service wall time | **49,544 / 49,561 ms** |
+| Result membership | **One** member, case_id null; correct approved alert/date/window |
+| Findings / gaps / next checks | **3 / 0 / 2** |
+| Tool trace | **7** steps |
+| Native graph | Anchor plus **one onward payment**, three account nodes; real browser canvas rendered |
+| SDK retry attempts / provider errors | **0 / 0** |
+| Configured estimated model spend | **$0.08277**, excluding Athena; estimate, not an AWS billing amount |
+
+The UI displayed the separate **On-Demand Brief**, actual model/token/latency
+metadata, all finding and next-check sentences, the explicit no-gaps state, and
+the tool trace. The embedded graph's transaction IDs matched the returned native
+member graph, and screenshots were inspected. A supporting evidence reference
+was clicked successfully. Switching to Saved Batch Brief retained its original
+three-member case/run/summary; switching back restored the single-alert result.
+Page changes and evidence/view reruns made **zero additional AWS operations**
+and did not repeat execution. The cost acknowledgement was cleared using browser
+pointer input and Run again became disabled, also without AWS calls. No product
+defect was found and no code fix was needed.
+
+Both saved and on-demand briefs returned finding codes `FAN_OUT`,
+`NEIGHBOURS_HIGH_RISK` and `REPEAT_ACCOUNT_ALERTS`. That agreement is not proof of
+identical evidence: the saved case has three members and an end-of-day cutoff;
+the on-demand result has one member and 48 hours after the alert, including one
+onward payment absent from the saved graph. The on-demand horizon is explicitly
+shown. The saved batch publication was never overwritten.
+
+Operations **for this approved-execution turn only**, additional to the earlier
+Prompt 8 reads:
+
+| Phase | Actual operations |
+|---|---|
+| Identity | STS GetCallerIdentity 1 |
+| Browser preparation | Athena StartQueryExecution 1, GetQueryExecution 2, GetQueryResults 1; DynamoDB BatchGetItem 1, GetItem 1; S3 GetObject 1 |
+| Single agent execution | Athena StartQueryExecution **10**, GetQueryExecution **25**, GetQueryResults **10**; Bedrock Converse **3** |
+
+Preparation query: **400,986 bytes**, **853 ms engine**, **1,047 ms Athena total**.
+The agent's ten successful queries scanned **130,973,587 bytes** combined, with
+**8,931 ms summed engine time** and **11,211 ms summed Athena execution time**.
+These sums cover multiple queries and are not whole-run wall latency. Athena
+performed its usual query-output writes only. No DynamoDB writes, SQS/Kinesis
+consumption, Lambda invocation, ETL, agent batch, IAM or infrastructure change
+occurred. Returned SDK metadata reported zero transport retries on every logged
+operation. No failure-driven query resubmission occurred.
+
+The model estimate uses the existing configured rates:
+`17,500 × $3 / million + 2,018 × $15 / million = $0.08277`.
+It excludes Athena and is not a verified billing charge. Raw results, response
+telemetry, marker files, screenshots and the temporary wrapper remain outside Git
+under `/private/tmp/bda-streamlit-prompt8/`. No real record or generated output
+was added to fixtures or committed.
+
+Full unit/UI regressions ran again: **753 passed**. UI Ruff and dependency checks
+passed; repository Ruff remains the same 14 unrelated diagnostics in unchanged
+files. No new regression test was needed because no product bug was found.
+
+The one approved invocation is consumed. Additional investigations require new
+approval. Remaining limits are broader population coverage, real-time missing/
+fallback states not observed live, exact AWS billing, and interruption behavior
+for a provider timeout (not deliberately induced). A successful run does not
+turn the backend's between-call timeout into a hard cancellation guarantee.
