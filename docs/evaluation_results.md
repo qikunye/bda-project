@@ -46,8 +46,8 @@ FAN-OUT pattern is caught by FAN_OUT 55%, 43% and 53% of the time; FAN-IN by FAN
 
 ## Does the LLM brief stay faithful? (S2 vs S1, same cases)
 
-S2 keeps the code's findings almost exactly: across the three days it dropped 9 findings (mostly
-NEIGHBOURS_HIGH_RISK) and added 7 (mostly REPEAT_ACCOUNT_ALERTS) out of several hundred. Every
+S2 keeps the code's findings almost exactly: of S1's 297 findings on the same cases it dropped 12
+(8 of them NEIGHBOURS_HIGH_RISK) and added 6 (all REPEAT_ACCOUNT_ALERTS). Every
 finding it keeps is checked against the tool results by the validator.
 
 ## Repeatability (14 Sep, top 50, three S2 runs)
