@@ -4,8 +4,10 @@
 **Branch / resumed baseline:** `streamlit`, `c2ef834`
 **Region:** `us-east-1`
 **Outcome:** bounded AWS read verification succeeded after the user refreshed login.
-Interactive visual browser verification and live on-demand agent execution remain
-untested. This is a sampled integration check, not a pipeline health assessment.
+At the Prompt 7 boundary, browser and live on-demand execution were untested.
+The Prompt 8 section below records subsequent actual Chrome verification and the
+remaining explicit approval boundary for one on-demand run. This is a sampled
+integration check, not a pipeline health assessment.
 
 ## Identity and Git
 
@@ -154,3 +156,155 @@ agent execution (deliberately excluded), unsampled saved-result states, real-tim
 missing/delayed/fallback examples, and a bounded chronological/session ID source.
 Authentication is no longer the blocker. Offline demo and explicit live-read
 paths remain separate; failed reads never substitute sample data.
+
+## Prompt 8 — live browser verification and approval boundary
+
+**Date:** 8 November 2026 (Asia/Singapore). **Baseline:** `streamlit`,
+`36019e9`, initially clean and aligned with `origin/streamlit`. This section
+supersedes the earlier interactive-browser limitation. No merge, push or change
+to `main` occurred.
+
+STS identity succeeded again without displaying identifiers. The existing app
+was launched from the project environment on `http://127.0.0.1:8502`. Installed
+Chrome was controlled headlessly through its local DevTools protocol; screenshots
+were inspected. No browser package or monitoring tool was installed. A temporary
+Python startup guard outside Git recorded SDK operation names and permitted only
+the bounded reads below, blocking Bedrock runtime, scans, writes and a second
+queue submission. No app/agent code was replaced with replay responses.
+
+### Actual browser results
+
+- **Queue:** switching to Live made zero AWS calls. Explicit load for
+  `2022-09-14`, top K 5, returned five real alerts in ranks 1–5. Screenshot and
+  browser table checks confirmed ordering, displayed scores, Live source and
+  saved availability; no demo transaction appeared. Four decisions had findings
+  and one had none. One Athena execution scanned **400,986 bytes**, with
+  **682 ms engine** and **873 ms total Athena execution time**. These are this
+  run's service metrics, separate from Prompt 7's timing.
+- **Saved case:** opened the rank-one representative and verified its saved run
+  identity, case ID, three members, three finding sentences, gaps, next checks,
+  money-flow presentation, execution metadata and tool trace. Switched through all
+  three members in Chrome. Each graph canvas rendered and its embedded node/edge
+  IDs matched the corresponding saved member graph. All three saved graphs have
+  **zero surrounding payments and one anchor payment**; this is visibly labelled,
+  not a claim of three expanded networks. Overall findings can cite account
+  activity in the saved trace outside those displayed graphs. No per-currency
+  metric rows were supplied for these members; the UI shows the explicit empty
+  state rather than fabricated totals. Nonempty currency-table formatting remains
+  covered by offline tests.
+- **Evidence:** clicked both trace-based and graph-based real supporting IDs.
+  Trace details appeared for references outside the graph; graph references
+  selected the appropriate member and highlighted the exact edge. Expanded
+  execution metadata and the tool trace. These actions, member switches and
+  cost-acknowledgement toggles and a graph-canvas click made **zero additional AWS
+  calls**. No agent ran.
+- **On-demand gate:** the real Live button was disabled before acknowledgement,
+  enabled after checking it, and disabled again after clearing it. It was never
+  clicked. Checking acknowledgement alone caused no AWS operations.
+- **Real-time:** selected Live without reads, then explicitly loaded the same two
+  known IDs retained outside Git from Prompt 7. Four keyed GetItem calls returned
+  two available pairs. Both displayed matching source timestamps, amounts,
+  numeric scores, narratives and parsed next-check strings; screenshots were
+  inspected. Both source statuses were `ok`; no fallback/missing brief occurred
+  in this live sample. Missing/fallback/failure rendering remains verified by
+  existing offline tests, not manufactured live records.
+- **Navigation:** switching among queue, investigation and real-time pages reused
+  loaded state with zero additional AWS calls. Graph/evidence selection and
+  trace expansion did not submit Athena or Bedrock operations. No actual failed
+  cloud read was induced; the no-demo-on-failure behavior remains covered by the
+  regression suite. Offline demos and legacy BQ2 passed that suite.
+
+No product integration defect was found, so no production code or new fixtures
+were changed. Browser-driver timing/selector corrections were confined to the
+private temporary automation scripts.
+
+### Observed operations for Prompt 8, before approval
+
+| Service | SDK operations |
+|---|---|
+| STS | GetCallerIdentity 1 |
+| Athena | StartQueryExecution 1; GetQueryExecution 2; GetQueryResults 1 |
+| DynamoDB | BatchGetItem 1; GetItem 5 (one case and four real-time items) |
+| S3 | GetObject 1 (stored case trace) |
+| Bedrock control plane | GetInferenceProfile 1; GetFoundationModelAvailability 1 |
+| Bedrock runtime / agent execution | **0** |
+
+These are SDK operation counts, not packet-level attempt telemetry. No metadata
+reinspection, S3 listing, Scan, application write, pipeline run or infrastructure
+change was needed. Athena wrote only its normal query output. Raw browser text,
+screenshots, response data, instrumentation and known real-time IDs remain under
+`/private/tmp/bda-streamlit-prompt8/` or the previous private temporary directory,
+outside Git.
+
+### Prepared invocation — not executed
+
+Proposed request, through the existing Streamlit button after explicit approval:
+
+```python
+investigate(
+    "txn_613ac569efe8fc2e024adfbeae71b746",
+    "2022-09-14",
+    window_h=48,
+)
+```
+
+This is daily rank **1**, BQ1 score **0.9975132942199707**, with an existing
+compatible saved batch brief. The saved case has three members; the proposed
+on-demand result is an unsaved **single-alert** investigation. Its observation
+cutoff may include later payments, unlike the batch end-of-day cutoff, so a
+finding difference is not a controlled model comparison.
+
+The configured model is `us.anthropic.claude-sonnet-4-5-20250929-v1:0` in
+`us-east-1`. GetInferenceProfile returned ACTIVE / SYSTEM_DEFINED with three
+model destinations. GetFoundationModelAvailability returned agreement,
+entitlement and region AVAILABLE and authorization AUTHORIZED. These metadata
+results do **not** prove a Converse call will succeed under runtime IAM, routing,
+capacity or service-control restrictions. No runtime probe was sent.
+
+Inspected safeguards in `investigate.py`, `llm.py`, `loop.py` and `config.py`:
+
+| Control | Implemented behavior |
+|---|---|
+| Replies | Eight ordinary LLM replies; at most one additional brief-repair reply |
+| Tool requests | At most four handled tool requests per ordinary reply |
+| Output | Explicit maximum 1,500 tokens per reply |
+| Run tokens | 120,000 input + output; checked before a reply, so one reply can overshoot |
+| Run time | 150 seconds checked before each LLM reply; seed reads, active provider calls, fallback/final graph work are not forcibly cancelled |
+| Provider timeout | Bedrock read timeout 90 seconds per HTTP attempt; not a whole-run cancellation guarantee |
+| Estimated spend | $10 process-wide estimated LLM cap, shared by runs; checked before a reply, not reserved or a hard billing cap |
+| Estimator | Configured $3 / million input tokens and $15 / million output tokens; not independently verified current AWS billing rates |
+| Persistence | On-demand result stays in Streamlit session; saved batch result is preserved; no DynamoDB publication |
+
+Expected operations are a date-filtered alert lookup plus a variable number of
+label-free Athena score, case-graph, account-activity, neighbour-score and
+related-alert queries chosen by the agent. Graph completion or code-only fallback
+can perform additional Athena reads. Bedrock uses Converse over multiple turns
+(up to eight ordinary plus one repair), not one HTTP request. Athena scan volume
+and exact token use cannot be known before execution.
+
+For scale only, the existing **grouped saved run** reports 22,186 input and 1,616
+output tokens: **$0.090798 using the configured estimator**, plus Athena. This is
+historical saved metadata, neither a new execution nor a prediction or exact AWS
+bill for the proposed single-alert run. New model token, latency and cost results
+are unavailable because the proposed run has not occurred.
+
+The production Bedrock client currently configures three SDK retries (up to four
+HTTP attempts), and the Athena runner can retry internal query failures. To meet
+Prompt 8's **no automatic retry** condition, any approved run must use a temporary
+test-session guard that suppresses SDK retries and blocks repeated failed query
+submission. Agent rules, prompts, token/time/spend settings and production retry
+code will remain unchanged. No second investigation or failure-driven resubmission
+is authorised. A provider failure must be recorded and stop the test; an existing
+backend code-only fallback must be labelled accurately if returned.
+
+**Awaiting explicit user approval for exactly this one investigation.** The
+current browser session remains read-guarded with Bedrock runtime blocked. No
+`investigate()` call or real on-demand result exists yet.
+
+### Regression status
+
+Full unit/UI suite: **753 passed**; UI Ruff and dependency checks passed. The same
+14 repository-wide Ruff findings remain in files unchanged from `36019e9`.
+Whitespace checks passed. No code fix required a new regression test. Remaining
+limits are the unapproved on-demand execution, runtime model access, actual
+on-demand token/latency/scan metrics and unsampled live missing/fallback states.
