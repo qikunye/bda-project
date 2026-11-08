@@ -8,6 +8,15 @@ from src.agent.contracts import Alert, InvestigateResult, MemberMoneyFlow
 
 UNAVAILABLE = "Unavailable / not applicable"
 
+FINDING_TITLES = {
+    "PASS_THROUGH": "Rapid onward transfers",
+    "FAN_OUT": "Payments distributed to multiple accounts",
+    "FAN_IN": "Payments received from multiple accounts",
+    "MONEY_RETURNS": "Funds returning to an earlier account",
+    "NEIGHBOURS_HIGH_RISK": "Connected payments also ranked highly",
+    "REPEAT_ACCOUNT_ALERTS": "Repeated alerts involving the same accounts",
+}
+
 
 def _number(value: float | None, *, suffix: str = "", digits: int = 2) -> str:
     return UNAVAILABLE if value is None else f"{value:,.{digits}f}{suffix}"
@@ -40,24 +49,15 @@ def render_selected_alert(alert: Alert, window_h: int) -> None:
     st.subheader("Selected alert")
     with st.container(border=True):
         st.text(f"Transaction ID: {alert['txn_id']}")
-        left, right = st.columns(2)
-        with left:
-            st.text(f"Date: {alert.get('txn_date', UNAVAILABLE)}")
-            st.text(f"Timestamp (UTC): {alert.get('ts', UNAVAILABLE)}")
-            st.text(f"Sender: {alert.get('sender', UNAVAILABLE)}")
-            st.text(f"Receiver: {alert.get('receiver', UNAVAILABLE)}")
-        with right:
-            amount = _number(alert.get("amount"))
-            currency = alert.get("currency")
-            st.text(f"Amount: {amount}{' ' + currency if currency else ''}")
-            st.text(f"Currency: {currency or UNAVAILABLE}")
-            st.text(f"Payment format: {alert.get('payment_format') or UNAVAILABLE}")
-            st.text(f"Requested investigation window: ±{window_h} hours")
-
-        score, day_rank, global_rank = st.columns(3)
+        identity, score, rank = st.columns([3, 1, 1])
+        with identity:
+            st.text(f"{alert.get('sender') or UNAVAILABLE} → {alert.get('receiver') or UNAVAILABLE}")
+            st.text(f"Amount: {_number(alert.get('amount'))} {alert.get('currency') or ''}")
+            st.caption(f"Timestamp (UTC): {alert.get('ts') or UNAVAILABLE}")
+            st.caption(f"Currency: {alert.get('currency') or UNAVAILABLE} · "
+                       f"Payment format: {alert.get('payment_format') or UNAVAILABLE} · Window: ±{window_h} hours")
         score.metric("BQ1 risk score · ranking signal", _number(alert.get("risk_score"), digits=4))
-        day_rank.metric("BQ1 daily rank", _number(alert.get("risk_rank_day"), digits=0))
-        global_rank.metric("BQ1 global rank", _number(alert.get("risk_rank_global"), digits=0))
+        rank.metric("BQ1 daily rank", _number(alert.get("risk_rank_day"), digits=0))
         st.caption("The BQ1 score is a ranking signal, not a laundering probability.")
 
 
@@ -72,7 +72,7 @@ def render_findings(result: InvestigateResult, evidence_renderer: Callable | Non
         st.info("No supported finding was identified in the available evidence.")
     for index, finding in enumerate(result["findings"]):
         with st.container(border=True):
-            st.markdown(f"**{finding['code'].replace('_', ' ').capitalize()}**")
+            st.markdown(f"**{FINDING_TITLES.get(finding['code'], finding['code'].replace('_', ' ').capitalize())}**")
             st.write(finding["sentence"])
             if evidence_renderer is None:
                 _references(finding["evidence_ids"])
@@ -91,6 +91,8 @@ def render_gaps_and_checks(result: InvestigateResult) -> None:
     st.subheader("Recommended next checks")
     if not result["next_checks"]:
         st.caption("No next checks were supplied.")
+    else:
+        st.caption("Suggested follow-ups for the analyst; these checks have not been completed here.")
     for check in result["next_checks"]:
         st.markdown(f"- [ ] {check['sentence']}")
 
@@ -120,7 +122,12 @@ def render_money_flow(flow: MemberMoneyFlow | None) -> None:
         st.info("No payments into the sender or out of the receiver are available in this window.")
     rows = money_flow_rows(flow)
     if rows:
-        st.dataframe(rows, hide_index=True, width="stretch")
+        st.dataframe(rows, hide_index=True, width="stretch", column_config={
+            "Quick onward share": st.column_config.TextColumn(
+                help="Onward payments in the configured quick-payment interval divided by the alert amount, "
+                     "within each currency. May exceed 1; not a probability or proof that the same funds moved."
+            ),
+        })
     else:
         st.caption("No per-currency metrics are available.")
     st.caption(
@@ -139,6 +146,7 @@ def render_provenance(result: InvestigateResult) -> None:
             st.info("Accepted after repair — the brief passed after one retry.")
         with st.expander("How this brief was generated", expanded=False):
             st.caption("Execution metadata supplied with this result.")
+            st.text("Finding codes: " + (", ".join(finding["code"] for finding in result["findings"]) or "None"))
             st.json(stats)
 
     with st.expander("Tool trace", expanded=False):

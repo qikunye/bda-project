@@ -4,7 +4,7 @@ import streamlit as st
 
 
 def render_project_notices() -> None:
-    with st.expander("Data and interpretation limits", expanded=False):
+    with st.sidebar.expander("Data and interpretation limits", expanded=False):
         st.write("The IBM AML data is synthetic. Full analysis days end on 16 September 2022; "
                  "small later pipeline runs do not establish model effectiveness.")
         st.write("BQ1 scores support ranking, not calibrated laundering probabilities. Findings and connected "

@@ -40,7 +40,7 @@ def _service(source: str):
 
 def render_realtime() -> None:
     st.title("Real-Time AML Monitoring")
-    st.caption("Inspect scored alerts and their separate Lambda explanations. Refresh only when you request it.")
+    st.caption("View a scored alert, then read its explanation when available. Load or refresh explicitly; this page does not poll.")
     sources = [DEMO_SOURCE, LIVE_SOURCE]
     source = st.sidebar.radio("Real-time data source", sources, key="ui_rt_source",
                               index=sources.index(st.session_state.get("ui_rt_source_choice", DEMO_SOURCE)))
@@ -48,11 +48,10 @@ def render_realtime() -> None:
     if source == DEMO_SOURCE:
         st.warning("DEMO DATA — All real-time records, timestamps, groups and explanations here are invented samples. "
                    "No Kinesis, Lambda, DynamoDB or agent execution occurred.")
-        st.caption("Demo sessions are presentation groups, not verified pipeline session manifests.")
     else:
-        st.info("LIVE DYNAMODB — Known transaction IDs only. Reads start on Load or Refresh, never on source selection.")
-        st.caption("Key and field mappings were checked against deployed table metadata, writer exports and "
-                   "bounded records. Both tables have txn-only string keys and no chronological indexes.")
+        st.info("LIVE DYNAMODB — Synthetic IBM AML pipeline records, known transaction IDs only. Reads start on Load or Refresh, never on source selection.")
+    st.caption("A scored alert can appear before its explanation. These explanations come from the separate "
+               "Lambda pipeline, not the investigation agent. Known-ID lookup only; this is not a live feed.")
     render_project_notices()
     with st.expander("Pipeline and integration scope", expanded=False):
         st.text("Kinesis → is459-rt-scorer → is459_rt_alerts → is459-rt-explainer → is459_rt_briefs → Streamlit")

@@ -77,6 +77,7 @@ def render_realtime_record(record: RealtimeRecord) -> None:
                         st.text(f"Reported ingest-to-score latency: {alert.ingest_to_score_ms:g} ms")
     if record.brief is not None:
         st.subheader("Real-time explanation")
+        st.caption("Completed explanation record" if record.brief.content_mapped else "Explanation record has limited content")
         st.caption("Generated pipeline interpretation, not independently validated investigation-agent findings.")
         brief = record.brief
         if not brief.content_mapped:

@@ -32,7 +32,7 @@ def dashboard(backend=None, source=DEMO_SOURCE):
 
 def open_alert(app, txn_id):
     app.selectbox(key="ui_batch_queue_alert").set_value(txn_id)
-    next(button for button in app.button if button.label == "Open Investigation").click().run()
+    next(button for button in app.button if button.label == "Open Selected Investigation").click().run()
     assert not app.exception
     assert app.radio(key="ui_navigation_page").value == "Investigation"
     return app
@@ -41,8 +41,8 @@ def open_alert(app, txn_id):
 def test_default_demo_queue_retains_original_rank_and_all_availability_states():
     app = dashboard()
     table = app.dataframe[0].value
-    assert table["BQ1 daily rank"].tolist() == sorted(table["BQ1 daily rank"].tolist())
-    assert {"No saved brief", "Saved · no findings", "Saved · code-only fallback"} <= set(table["Brief availability"])
+    assert table["Daily rank"].tolist() == sorted(table["Daily rank"].tolist())
+    assert {"No saved investigation", "No supported findings", "Code-only fallback"} <= set(table["Brief status"])
     assert "txn_demounprocessed" in set(table["Transaction ID"])
     assert "not Athena results" in content(app)
     for excluded in ("evaluation_is_laundering", "data_split", "confidence", "verdict"):
@@ -167,8 +167,8 @@ def test_saved_read_failures_and_incompatible_records_are_visible(status):
     assert f"Saved {status} test" in content(app)
     assert not app.get("iframe")
     app.button[0].click().run()
-    status_label = "Read failed" if status == "error" else "Incompatible saved data"
-    assert status_label in set(app.dataframe[0].value["Brief availability"])
+    status_label = "Unable to load investigation" if status == "error" else "Incompatible saved investigation"
+    assert status_label in set(app.dataframe[0].value["Brief status"])
 
 
 def test_live_source_is_retained_across_legacy_navigation():

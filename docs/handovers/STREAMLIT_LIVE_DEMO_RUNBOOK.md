@@ -70,10 +70,10 @@ verification evidence, not current AWS reads. Do not copy raw dumps into Git.
 
 | Time | Presenter action and narration |
 |---|---|
-| 0:00–0:45 | Open **Alert Queue**, choose **Live batch (read-only)**, date **2022-09-14**, **Review top K = 5**, then **Load / refresh queue**. “BQ1 gives us a practical place to start. The daily rank orders the payments for review. The score is a ranking signal, not a probability of laundering.” |
-| 0:45–1:30 | Select `txn_613ac569efe8fc2e024adfbeae71b746`, then **Open Investigation**. Show **Saved Batch Brief**, saved run identity and three members. “This investigation was prepared earlier for a group of connected alerts. Opening it retrieves the stored evidence; it does not ask the model to investigate again.” |
+| 0:00–0:45 | Open **Alert Queue**, choose **Live batch (read-only)**, date **2022-09-14**, **Number of alerts to review = 5**, then **Load / refresh queue**. “BQ1 gives us a practical place to start. The daily rank orders the payments for review. The score is a ranking signal, not a probability of laundering.” |
+| 0:45–1:30 | Select `txn_613ac569efe8fc2e024adfbeae71b746`, then **Open Selected Investigation**. Show **Saved Batch Brief**, saved run identity and three members. “This investigation was prepared earlier for a group of connected alerts. Opening it retrieves the stored evidence; it does not ask the model to investigate again.” |
 | 1:30–2:30 | Show the native money-flow graph and switch case members. Read one finding in plain language, then click a supporting evidence ID. “BQ2 shows the payments around the alert. We can follow a statement back to its evidence and move between members of the case.” Explain that this saved sample has an anchor payment but no surrounding graph payments for each member. Other account activity is available in the supporting trace. Empty context is a visibility limit, not a broken graph or proof of innocence. |
-| 2:30–3:30 | Explain the **Run an investigation** controls without checking the Live acknowledgement or clicking Run. If the original session still offers **On-Demand Brief** for this exact alert/date/48-hour window, switch to it and back. “We also tested one investigation requested by the analyst. It returned three validated findings in about 50 seconds. It remains separate from the saved case.” If absent, show the report or retained screenshot and identify it as the earlier completed test. |
+| 2:30–3:30 | Explain the collapsed **Advanced: Run a new AI investigation** controls without checking the Live acknowledgement or clicking Run. If the original session still offers **On-Demand Brief** for this exact alert/date/48-hour window, switch to it and back. “We also tested one investigation requested by the analyst. It returned three validated findings in about 50 seconds. It remains separate from the saved case.” If absent, show the report or retained screenshot and identify it as the earlier completed test. |
 | 3:30–4:45 | Open **Real-Time Monitoring**, choose **Live DynamoDB (read-only)**, enter the two known IDs and click **Load known alerts**. Show score, transaction time, scoring timestamp, narrative and next checks; select the other record without refreshing. “This is the separate Kinesis and Lambda path. We are reading two stored alerts and their Lambda explanations. We are not starting the stream, checking pipeline health or running the investigation agent.” |
 | 4:45–5:30 | Expand **Pipeline and integration scope** if useful. Explain the independent stream: Kinesis → scorer Lambda → alert table → explainer → brief table → dashboard. This page supports known-ID lookup, not automatic recent-alert discovery. |
 | 5:30–6:00 | Return to the investigation or queue. “BQ1 prioritises the alerts, BQ2 reveals connected transactions, and the agent organises evidence into a brief with findings, gaps and next checks. The analyst reviews that evidence and makes the final decision. These patterns do not prove money laundering.” |
@@ -136,11 +136,11 @@ already been consumed; another requires new approval.
    **Sample session: mixed alerts**, then **Load known alerts**. Show
    `demo_rt_complete` and `demo_rt_pending`. These static examples do not imply
    that a Lambda finished processing during the demonstration.
-5. **Agent Evidence Brief (Demo)** offers nine additional sample scenarios for
+5. **Agent Examples** offers nine additional sample scenarios for
    missing data, repaired briefs and fallback if questions arise.
 
 Offline mode requires no credentials, Bedrock, CDN or AWS pipeline. Avoid the
-**BQ2 Money Trail (Legacy)** page for the offline fallback: its original query
+**Legacy BQ2** page for the offline fallback: its original query
 submission uses Athena.
 
 ## Charges and execution boundaries

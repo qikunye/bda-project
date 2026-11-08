@@ -23,10 +23,10 @@ def _text(app):
 def test_offline_demo_journeys_a_b_c():
     # A: BQ1 order, saved case, native graph, cross-member evidence and provenance.
     app = AppTest.from_file(APP, default_timeout=10).run()
-    ranks = app.dataframe[0].value["BQ1 daily rank"].tolist()
+    ranks = app.dataframe[0].value["Daily rank"].tolist()
     assert ranks == sorted(ranks)
     app.selectbox(key="ui_batch_queue_alert").set_value("txn_samplefanmember")
-    _button(app, "Open Investigation").click().run()
+    _button(app, "Open Selected Investigation").click().run()
     assert app.get("iframe") and app.selectbox(key="ui_batch_member").value == "txn_samplefanmember"
     _button(app, "txn_samplefanup").click().run()
     assert app.selectbox(key="ui_batch_member").value == "txn_samplefan"
@@ -39,7 +39,7 @@ def test_offline_demo_journeys_a_b_c():
     # B: Explicit simulation, independent views and no repeated execution on reruns.
     _button(app, "Back to Alert Queue").click().run()
     app.selectbox(key="ui_batch_queue_alert").set_value("txn_samplepass")
-    _button(app, "Open Investigation").click().run()
+    _button(app, "Open Selected Investigation").click().run()
     runner = Mock(wraps=DemoOnDemandService())
     app.session_state["ui_on_demand_services"] = {DEMO_SOURCE: runner}
     _button(app, "Run Agent Investigation").click().run()

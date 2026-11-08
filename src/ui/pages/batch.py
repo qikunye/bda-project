@@ -10,6 +10,15 @@ from src.ui.services.queue import LiveBatchService
 DEMO_SOURCE = "Demo (offline)"
 LIVE_SOURCE = "Live batch (read-only)"
 
+BRIEF_LABELS = {
+    "saved": "Investigation available",
+    "missing": "No saved investigation",
+    "empty": "No supported findings",
+    "fallback": "Code-only fallback",
+    "error": "Unable to load investigation",
+    "incompatible": "Incompatible saved investigation",
+}
+
 
 def batch_source() -> str:
     sources = [DEMO_SOURCE, LIVE_SOURCE]
@@ -21,15 +30,14 @@ def batch_source() -> str:
     st.session_state["ui_batch_source_choice"] = source
     if source == DEMO_SOURCE:
         st.warning(DEMO_NOTICE)
-        st.caption(
-            "Synthetic queue ranks and scores are fixture values, not Athena results. "
-            "txn_demounprocessed is an additional invented queue record. "
-            "Top K limits sample rows; fixture ranks may tie or have gaps. "
-            "Sample results illustrate different windows; they are not a historical batch replay."
-        )
     else:
-        st.info("LIVE BATCH — Read-only saved data. Reads begin only when you load a queue.")
-    st.caption("Data is synthetic. Full analysis days end on 16 Sep 2022. Scores are ranking signals, not probabilities.")
+        st.info("LIVE BATCH — Stored results from the synthetic IBM AML dataset. Load a queue to read AWS records.")
+    with st.sidebar.expander("About this data source", expanded=False):
+        st.caption("Synthetic queue ranks and scores are fixture values, not Athena results. "
+                   "Demo records illustrate result shapes, not a historical batch replay."
+                   if source == DEMO_SOURCE else
+                   "Queue reads use Athena; saved investigations use DynamoDB and S3. "
+                   "Opening a saved investigation does not run the agent.")
     render_project_notices()
     return source
 

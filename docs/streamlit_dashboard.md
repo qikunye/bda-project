@@ -12,15 +12,47 @@ PyVis is pinned in `requirements.txt`; graph JavaScript is loaded from that
 installed package and embedded inline, without CDN requests.
 
 Navigation: **Alert Queue → Investigation → Real-Time Monitoring → Agent Evidence
-Brief (Demo) → BQ2 Money Trail (Legacy)**. Batch and real-time sources have separate
+Brief (Demo) → Legacy BQ2**. Batch and real-time sources have separate
 selectors; their loaded records never substitute for one another. The collapsed
 **Data and interpretation limits** section summarises the project limitations.
+
+## Analyst review experience
+
+The queue opens as **AML Alert Review**, with a short three-step guide. Source
+selection is in the sidebar; date, review limit and refresh are together above
+six columns: daily rank, transaction ID, risk score, transaction time, brief
+status and finding count. New sessions start with 20 alerts, enough to include
+all nine current 14 September Demo examples. The configured backend maximum is
+unchanged. Select a table row and choose **Open Selected Investigation**; a
+collapsed keyboard alternative and secondary alert details remain available.
+The table always preserves the supplied BQ1 order.
+
+Every loaded queue has a new table generation. Selection is validated before
+keyed widgets render, including date/source/limit changes and page returns.
+An invalid Open callback shows a friendly notice, keeps the active queue and
+performs no saved-result read. Empty queues disable investigation navigation.
+
+Investigations show the supplied summary and plain-English finding headings,
+followed by the native graph alongside a readable supporting-transaction card.
+Click a finding citation to see supplied sender/receiver, amount/currency, time,
+role and relative gap, with the matching edge labelled **Selected**. Trace-only
+references show their source tool/step, explicit account-activity direction when
+available, and missing fields honestly. Raw evidence JSON is optional.
+
+Money-flow metrics, observations and execution metadata are expandable. Gaps
+and recommended next checks remain readable, and interpretations stay separate
+from validated findings. **Advanced: Run a new AI investigation** is below the
+saved result and collapsed by default; its acknowledgement/button and independent
+session results are unchanged. No new execution occurs when inspecting evidence.
+
+See the [UX verification and screenshots](handovers/STREAMLIT_UX_VERIFICATION.md)
+for the guarded offline browser rehearsal and regression coverage.
 
 ## Offline walkthrough
 
 1. Open the 14 September sample queue. Its ranks and scores are invented fixture
    values; tied/gapped ranks are retained. Top K limits the number of demo rows.
-2. Select `txn_samplefanmember` and choose **Open Investigation**. The selected
+2. Select `txn_samplefanmember` and choose **Open Selected Investigation**. The selected
    member remains active while the representative's overall case brief is shown.
 3. Inspect the native member graph and choose a finding's supporting ID. Graph
    transactions highlight directly; references to another member switch members.
@@ -30,7 +62,7 @@ selectors; their loaded records never substitute for one another. The collapsed
 5. Open 16 September for the truncated-window fixture. There are no fixtures for
    15 September, so its demo queue is empty.
 
-The existing Agent Evidence Brief (Demo) screen retains all nine original
+The existing Agent Examples screen retains all nine original
 scenarios, including not-found, code-only and repaired. Legacy BQ2 remains in the
 same application. The real-time page reads persisted records only; no pipeline
 control is integrated.

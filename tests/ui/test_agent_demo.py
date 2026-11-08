@@ -50,7 +50,7 @@ def test_every_scenario_renders_supplied_content_without_aws(scenario):
     assert "No AWS services or Bedrock models are called." in content
     assert "Full analysis days end on 16 Sep 2022." in content
     assert app.selectbox(key="agent_demo_scenario").options == list(agent_demo.SCENARIO_LABELS.values())
-    assert LEGACY in app.radio(key="ui_navigation_page").options
+    assert "Legacy BQ2" in app.radio(key="ui_navigation_page").options
     assert "investigation" not in app.session_state
     assert not app.button  # No action can accidentally execute the agent.
     for forbidden_label in ("verdict", "confidence", "model reasons"):
@@ -58,7 +58,7 @@ def test_every_scenario_renders_supplied_content_without_aws(scenario):
 
     if result["status"] == "not_found":
         assert "Transaction not found." in content
-        assert not app.metric and not app.expander and not app.dataframe
+        assert not app.metric and not app.main.expander and not app.dataframe
         assert "Selected alert" not in content
         return
 
@@ -124,7 +124,7 @@ def test_execution_provenance_is_explicit(scenario, notice):
     assert notice in visible_text(app)
     assert json.loads(app.json[0].value) == SAMPLES[scenario]["stats"]
     assert all(not expander.proto.expanded for expander in app.expander)
-    assert [expander.label for expander in app.expander] == [
+    assert [expander.label for expander in app.main.expander] == [
         "How this brief was generated", "Tool trace",
     ]
     trace = SAMPLES[scenario]["trace"]

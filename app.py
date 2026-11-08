@@ -53,11 +53,31 @@ st.set_page_config(
     layout="wide"
 )
 
+PAGE_LABELS = {
+    "Alert Queue": "Alert Queue",
+    "Investigation": "Investigation",
+    "Real-Time Monitoring": "Real-Time Monitoring",
+    "Agent Evidence Brief (Demo)": "Agent Examples",
+    "BQ2 Money Trail (Legacy)": "Legacy BQ2",
+}
+PAGE_GUIDANCE = {
+    "Alert Queue": "Find transactions to review.",
+    "Investigation": "Explore money flow and supporting evidence.",
+    "Real-Time Monitoring": "Check stored incoming alerts and their Lambda explanations.",
+    "Agent Evidence Brief (Demo)": "Explore offline examples of investigation patterns.",
+    "BQ2 Money Trail (Legacy)": "Inspect the original network exploration tool.",
+}
+
 page = st.sidebar.radio(
     "Application",
     ["Alert Queue", "Investigation", "Real-Time Monitoring", "Agent Evidence Brief (Demo)", "BQ2 Money Trail (Legacy)"],
     key="ui_navigation_page",
+    format_func=PAGE_LABELS.get,
 )
+st.sidebar.caption(PAGE_GUIDANCE[page])
+with st.sidebar.expander("Explore the dashboard", expanded=False):
+    for name, description in PAGE_GUIDANCE.items():
+        st.caption(f"{PAGE_LABELS[name]} — {description}")
 
 if page == "Alert Queue":
     from src.ui.pages.queue import render_queue
