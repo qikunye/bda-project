@@ -119,14 +119,21 @@ def compare_runs(s1: list[CaseOutcome], s2: list[CaseOutcome]) -> dict:
 def same_rules_agree(s1: list[CaseOutcome], deep: list[CaseOutcome]) -> dict:
     """Label-free check that two code-only runs gave the same findings on the cases both hold.
 
-    S1 is deterministic, so any difference means one run saw different data (a query that came
-    back empty during a table change, say) and its rates should not be reported.
+    Only cases with the same members are compared: a deeper queue can pull lower-ranked alerts
+    into a case, which changes its findings by design. S1 is deterministic, so a difference on
+    an unchanged case means one run saw different data and its rates should not be reported.
     """
 
     deep_by = {c.case_id: c for c in deep}
-    both = [c for c in s1 if c.case_id in deep_by]
-    differ = [c.case_id for c in both if c.finding_codes != deep_by[c.case_id].finding_codes]
-    return {"cases_in_both": len(both), "differ": len(differ), "first_differ": differ[:5]}
+    shared = [c for c in s1 if c.case_id in deep_by]
+    same = [c for c in shared if c.member_txn_ids == deep_by[c.case_id].member_txn_ids]
+    differ = [c.case_id for c in same if c.finding_codes != deep_by[c.case_id].finding_codes]
+    return {
+        "cases_in_both": len(shared),
+        "same_members": len(same),
+        "differ": len(differ),
+        "first_differ": differ[:5],
+    }
 
 
 def reliability(s2: list[CaseOutcome]) -> dict:

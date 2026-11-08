@@ -79,7 +79,7 @@ cents.
 | `s2_vs_s1` | Findings S2 dropped from S1, and any it added. |
 | `reliability_s2`, `observation_marks` | Fallback and repair rates, and the share of observations marked useful, obvious and wrong. |
 | `cost_latency_s2` | Tokens, steps, estimated spend and latency per case (label-free). |
-| `s1_deep` | The same rates on the deeper S1 list, banded by real BQ1 rank, for both the BQ1-derived and the payment-based codes. |
+| `s1_deep` | The payment-based codes on the deeper S1 list, overall and banded by real BQ1 rank, plus pattern match. `agrees_with_s1` checks (label-free) that cases with the same members got the same findings as the top-100 S1; `run_evaluation` stops if any differ. The BQ1-derived codes are left out here: they count top-K alerts outside the case, and a top-500 queue pulls those alerts into the case, so on 14 Sep (the first scored day, no earlier-day alerts) they never fire at all. Their rates come from `s1_bq1_derived_by_rank_band`. |
 
 ## 5. One summary for all days
 
