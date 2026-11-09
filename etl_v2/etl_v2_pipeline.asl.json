@@ -1,0 +1,267 @@
+{
+  "Comment": "IS459 ETL v2 daily pipeline (batch, no Kinesis/Firehose): read Silver main -> parse the run day from the raw Bronze CSV into a Silver audit branch + source proof + Glue Data Quality -> gate -> publish (fast-forward main) -> BQ1 and BQ2 staging in parallel -> Gold commit. Input: {day, day_compact, run_tag, source_csv_key}. Any failure sends an SNS alert and leaves main and Gold unchanged.",
+  "StartAt": "ReadMainSnapshot",
+  "TimeoutSeconds": 10800,
+  "States": {
+    "ReadMainSnapshot": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:941377154820:function:is459-etl-v2-main-snapshot",
+        "Payload": {}
+      },
+      "ResultSelector": {
+        "main.$": "$.Payload.main_snapshot"
+      },
+      "ResultPath": "$.before",
+      "Next": "BuildIds",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.failure",
+          "Next": "NotifyFailure"
+        }
+      ]
+    },
+    "BuildIds": {
+      "Type": "Pass",
+      "Parameters": {
+        "dq_run_id.$": "States.Format('full-dq-{}-{}', $.day_compact, $.run_tag)",
+        "audit_branch.$": "States.Format('audit_full_{}_{}', $.day_compact, $.run_tag)",
+        "publish_run_id.$": "States.Format('full-publish-{}-{}', $.day_compact, $.run_tag)",
+        "day_run_id.$": "States.Format('full-day-{}-{}', $.day_compact, $.run_tag)",
+        "commit_run_id.$": "States.Format('gold-commit-{}-{}', $.day_compact, $.run_tag)",
+        "result_key.$": "States.Format('results/etl-v2/live-audit/full-dq-{}-{}.json', $.day_compact, $.run_tag)"
+      },
+      "ResultPath": "$.ids",
+      "Next": "SilverAuditDQ"
+    },
+    "SilverAuditDQ": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "is459_etl_v2_job-silver-audit-dq",
+        "Arguments": {
+          "--run-id.$": "$.ids.dq_run_id",
+          "--day.$": "$.day",
+          "--source-csv-key.$": "$.source_csv_key",
+          "--audit-branch.$": "$.ids.audit_branch",
+          "--expected-main-snapshot.$": "$.before.main",
+          "--mode": "audit"
+        }
+      },
+      "ResultSelector": {
+        "JobRunId.$": "$.Id",
+        "State.$": "$.JobRunState",
+        "Seconds.$": "$.ExecutionTime"
+      },
+      "ResultPath": "$.glue_dq",
+      "Next": "ReadQualityResult",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.failure",
+          "Next": "NotifyFailure"
+        }
+      ]
+    },
+    "ReadQualityResult": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:941377154820:function:is459-etl-v2-promote-gold",
+        "Payload": {
+          "run_id.$": "$.ids.dq_run_id",
+          "result_key.$": "$.ids.result_key",
+          "expected_main_snapshot.$": "$.before.main"
+        }
+      },
+      "ResultSelector": {
+        "result.$": "$.Payload"
+      },
+      "ResultPath": "$.quality",
+      "Next": "QualityChoice",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.failure",
+          "Next": "NotifyFailure"
+        }
+      ]
+    },
+    "QualityChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.quality.result.status",
+          "StringEquals": "PASS",
+          "Next": "Publish"
+        }
+      ],
+      "Default": "NotifyFailure"
+    },
+    "Publish": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "is459_etl_v2_job-publish",
+        "Arguments": {
+          "--run-id.$": "$.ids.publish_run_id",
+          "--expected-main-snapshot.$": "$.before.main",
+          "--expected-audit-snapshot.$": "$.quality.result.audit_snapshot_id",
+          "--dq-result-key.$": "$.ids.result_key",
+          "--audit-branch.$": "$.ids.audit_branch"
+        }
+      },
+      "ResultSelector": {
+        "JobRunId.$": "$.Id",
+        "State.$": "$.JobRunState",
+        "Seconds.$": "$.ExecutionTime"
+      },
+      "ResultPath": "$.glue_publish",
+      "Next": "Fingerprint",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.failure",
+          "Next": "NotifyFailure"
+        }
+      ]
+    },
+    "Fingerprint": {
+      "Type": "Pass",
+      "Parameters": {
+        "value.$": "States.Hash(States.Format('{}|{}|{}', $.day, $.quality.result.audit_snapshot_id, $.ids.day_run_id), 'SHA-256')"
+      },
+      "ResultPath": "$.fp",
+      "Next": "StageBQ1AndBQ2"
+    },
+    "StageBQ1AndBQ2": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "BQ1Day",
+          "States": {
+            "BQ1Day": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "is459_etl_v2_job-bq1-day",
+                "Arguments": {
+                  "--run-id.$": "$.ids.day_run_id",
+                  "--day.$": "$.day",
+                  "--snapshot-id.$": "$.quality.result.audit_snapshot_id",
+                  "--load-id.$": "$.ids.day_run_id",
+                  "--load-fingerprint.$": "$.fp.value",
+                  "--source-proof-key.$": "$.ids.result_key"
+                }
+              },
+              "ResultSelector": {
+                "JobRunId.$": "$.Id",
+                "State.$": "$.JobRunState",
+                "Seconds.$": "$.ExecutionTime"
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "BQ2Day",
+          "States": {
+            "BQ2Day": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "is459_etl_v2_job-bq2-day",
+                "Arguments": {
+                  "--run-id.$": "$.ids.day_run_id",
+                  "--day.$": "$.day",
+                  "--snapshot-id.$": "$.quality.result.audit_snapshot_id",
+                  "--load-id.$": "$.ids.day_run_id",
+                  "--load-fingerprint.$": "$.fp.value",
+                  "--source-proof-key.$": "$.ids.result_key"
+                }
+              },
+              "ResultSelector": {
+                "JobRunId.$": "$.Id",
+                "State.$": "$.JobRunState",
+                "Seconds.$": "$.ExecutionTime"
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.stage",
+      "Next": "GoldCommit",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.failure",
+          "Next": "NotifyFailure"
+        }
+      ]
+    },
+    "GoldCommit": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "is459_etl_v2_job-gold-commit",
+        "Arguments": {
+          "--run-id.$": "$.ids.commit_run_id",
+          "--day.$": "$.day",
+          "--load-id.$": "$.ids.day_run_id",
+          "--snapshot-id.$": "$.quality.result.audit_snapshot_id",
+          "--bq1-run-id.$": "$.ids.day_run_id",
+          "--bq2-run-id.$": "$.ids.day_run_id",
+          "--load-fingerprint.$": "$.fp.value"
+        }
+      },
+      "ResultSelector": {
+        "JobRunId.$": "$.Id",
+        "State.$": "$.JobRunState",
+        "Seconds.$": "$.ExecutionTime"
+      },
+      "ResultPath": "$.glue_commit",
+      "Next": "PipelineSucceeded",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.failure",
+          "Next": "NotifyFailure"
+        }
+      ]
+    },
+    "PipelineSucceeded": {
+      "Type": "Succeed"
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:941377154820:is459-etl-v2-failure-topic",
+        "Subject": "IS459 ETL v2 pipeline stopped",
+        "Message.$": "States.JsonToString($)"
+      },
+      "ResultPath": "$.notification",
+      "Next": "PipelineFailed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "PipelineStopped",
+      "Cause": "A step failed or the quality gate did not pass. Silver main and Gold were left unchanged by the failed step; see the failure field and run evidence."
+    }
+  }
+}
