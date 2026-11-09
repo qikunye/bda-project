@@ -1,0 +1,55 @@
+{
+  "base_rate": 0.00043644774386848695,
+  "params": {
+    "top_payment_format": "ACH",
+    "snd_out_cnt_24h_p95": 4224.0,
+    "rcv_distinct_snd_p95": 4.0,
+    "amt_ratio_min": 3.0
+  },
+  "weights": {
+    "payment_format == ACH": 1.877840960112464,
+    "is_new_pair": 0.8553534683637337,
+    "is_cross_currency": 0.0,
+    "snd_out_cnt_24h >= train p95": 1.141898731732256,
+    "amt_ratio_to_snd_mean >= 3": 0.16938383136054483,
+    "rcv_distinct_snd_to_date >= train p95": 0.6439223713035855
+  },
+  "detail": {
+    "payment_format == ACH": {
+      "train_rows": 448829,
+      "train_positives": 1281,
+      "train_rate": 0.0028540936525937497,
+      "lift": 6.539370847231971
+    },
+    "is_new_pair": {
+      "train_rows": 1296494,
+      "train_positives": 1331,
+      "train_rate": 0.0010266148551400932,
+      "lift": 2.352205663937259
+    },
+    "is_cross_currency": {
+      "train_rows": 54527,
+      "train_positives": 0,
+      "train_rate": 0.0,
+      "lift": 0.0
+    },
+    "snd_out_cnt_24h >= train p95": {
+      "train_rows": 207714,
+      "train_positives": 284,
+      "train_rate": 0.0013672646042154116,
+      "lift": 3.13271089935432
+    },
+    "amt_ratio_to_snd_mean >= 3": {
+      "train_rows": 400383,
+      "train_positives": 207,
+      "train_rate": 0.0005170049677433857,
+      "lift": 1.184574728605248
+    },
+    "rcv_distinct_snd_to_date >= train p95": {
+      "train_rows": 523486,
+      "train_positives": 435,
+      "train_rate": 0.0008309677813733319,
+      "lift": 1.9039341892525032
+    }
+  }
+}

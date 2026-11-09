@@ -1,0 +1,66 @@
+{
+  "feature_version": "v1",
+  "dataset": "li_small",
+  "silver_table": "is459_aml_silver.li_small_transactions_small_live_03",
+  "silver_path": "s3://is459-aml-g1t5/silver/ibm-aml/versions/small_live_03/li_small/transactions/",
+  "silver_run_ids": {
+    "ingest_run_id": [
+      "small_live_03"
+    ],
+    "dataset_variant": [
+      "li_small"
+    ],
+    "source_file": [
+      "LI-Small_Trans.csv"
+    ]
+  },
+  "seed": 42,
+  "split": "chronological 60/20/20 by row over 2022-09-01..2022-09-10 UTC; see split_config.json",
+  "library_versions": {
+    "python": "3.13.5",
+    "pyspark": "4.0.4",
+    "xgboost": "3.4.1",
+    "scikit-learn": "1.9.1",
+    "pandas": "3.0.6",
+    "pyarrow": "26.0.0",
+    "numpy": "2.5.3"
+  },
+  "models": {
+    "rules": {
+      "file": "rules_v1.json",
+      "fit": "train only",
+      "train_seconds": "<1"
+    },
+    "logistic_regression": {
+      "file": "lr_model.pkl",
+      "coefficients": "lr_coefficients.csv",
+      "train_seconds": 4,
+      "hyperparameters": {
+        "class_weight": "balanced",
+        "max_iter": 1000,
+        "train_sample": "all train positives + 5% of train negatives (seed 42)"
+      }
+    },
+    "xgboost": {
+      "file": "xgboost/model.ubj",
+      "train_seconds": 41,
+      "best_iteration": 74,
+      "val_pr_auc": 0.26623108500500664,
+      "hyperparameters": {
+        "tree_method": "hist",
+        "enable_categorical": true,
+        "max_depth": 8,
+        "min_child_weight": 20,
+        "learning_rate": 0.1,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "scale_pos_weight": 5,
+        "eval_metric": "aucpr",
+        "n_estimators_max": 2000,
+        "early_stopping_rounds": 50,
+        "random_state": 42
+      }
+    }
+  },
+  "notes": "Trained locally on a MacBook (8 cores, 16 GB). Data is synthetic IBM AML; rates are not real-world laundering rates."
+}

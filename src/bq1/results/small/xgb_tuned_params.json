@@ -1,0 +1,6 @@
+{
+  "spw": 5,
+  "max_depth": 8,
+  "min_child_weight": 20,
+  "val_pr_auc": 0.26623108500500664
+}

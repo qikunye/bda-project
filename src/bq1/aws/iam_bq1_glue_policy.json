@@ -1,0 +1,28 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BQ1ListGoldAndScripts",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": "arn:aws:s3:::is459-aml-g1t5",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["gold/bq1/*", "gold/bq1", "scripts/bq1/*", "scripts/bq1"]
+        }
+      }
+    },
+    {
+      "Sid": "BQ1ReadScriptAndZip",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::is459-aml-g1t5/scripts/bq1/*"
+    },
+    {
+      "Sid": "BQ1WriteGoldFeatures",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::is459-aml-g1t5/gold/bq1/*"
+    }
+  ]
+}

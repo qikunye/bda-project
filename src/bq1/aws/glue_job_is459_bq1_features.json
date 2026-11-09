@@ -1,0 +1,23 @@
+{
+  "Name": "is459_bq1_features",
+  "Description": "BQ1 alert prioritisation: causal transaction features (bq1/features.py) from Silver to gold/bq1/features/. No labels used as features.",
+  "Role": "arn:aws:iam::941377154820:role/service-role/AWSGlueServiceRole-is459-aml-g1t5",
+  "Command": {
+    "Name": "glueetl",
+    "ScriptLocation": "s3://is459-aml-g1t5/scripts/bq1/glue_bq1_features.py",
+    "PythonVersion": "3"
+  },
+  "DefaultArguments": {
+    "--extra-py-files": "s3://is459-aml-g1t5/scripts/bq1/bq1.zip",
+    "--variant": "v1",
+    "--job-language": "python",
+    "--enable-metrics": "true",
+    "--enable-continuous-cloudwatch-log": "true"
+  },
+  "GlueVersion": "5.0",
+  "WorkerType": "G.1X",
+  "NumberOfWorkers": 10,
+  "Timeout": 60,
+  "MaxRetries": 0,
+  "ExecutionProperty": { "MaxConcurrentRuns": 1 }
+}
