@@ -1,0 +1,7 @@
+FROM public.ecr.aws/lambda/python:3.12
+RUN dnf install -y gcc gcc-c++ cmake make && dnf clean all
+# Portable CPU build: Lambda x86_64 hosts support AVX2/FMA/F16C; never build for the build machine's own CPU.
+ENV CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BLAS=OFF -DLLAMA_CURL=OFF"
+RUN pip install --no-cache-dir "llama-cpp-python>=0.3.9,<0.4" "xgboost-cpu==3.2.0" numpy && python -c "import llama_cpp, xgboost; print(llama_cpp.__version__, xgboost.__version__)"
+COPY explainer_common.py explainer_app.py ${LAMBDA_TASK_ROOT}/
+CMD ["explainer_app.handler"]
