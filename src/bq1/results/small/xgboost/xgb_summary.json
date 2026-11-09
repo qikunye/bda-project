@@ -1,0 +1,10 @@
+{
+  "status": "current (tuned on validation only)",
+  "scale_pos_weight": 5,
+  "max_depth": 8,
+  "min_child_weight": 20,
+  "best_iteration": 74,
+  "val_pr_auc": 0.26623108500500664,
+  "train_seconds": 41,
+  "superseded": "xgb_summary_baseline_superseded.json (scale_pos_weight=sqrt(neg/pos)=47.9, default depth)"
+}

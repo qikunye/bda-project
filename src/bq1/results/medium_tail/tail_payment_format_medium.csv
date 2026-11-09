@@ -1,0 +1,14 @@
+grp,payment_format,rows,share
+tail negatives,ACH,599,1.0
+tail positives,ACH,771,1.0
+test negatives,Cheque,2604995,0.41697993578336595
+test negatives,Credit Card,1788298,0.2862517529598029
+test negatives,ACH,795975,0.12741122512141662
+test negatives,Cash,692126,0.11078818002875167
+test negatives,Wire,239882,0.038397763126449526
+test negatives,Bitcoin,126015,0.020171142980213344
+test positives,ACH,2094,0.69498838367076
+test positives,Cheque,475,0.15765018254231664
+test positives,Credit Card,273,0.09060736807168934
+test positives,Cash,132,0.04381015599070694
+test positives,Bitcoin,39,0.01294390972452705

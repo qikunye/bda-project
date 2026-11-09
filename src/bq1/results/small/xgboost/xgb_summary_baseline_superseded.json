@@ -1,0 +1,13 @@
+{
+  "chosen_scale_pos_weight": "sqrt(neg/pos)",
+  "scale_pos_weight": 47.85629573387287,
+  "best_iteration": 346,
+  "val_pr_auc": 0.24364896800444552,
+  "trials": {
+    "sqrt(neg/pos)": 47.85629573387287,
+    "neg/pos": 2290.2250413678985
+  },
+  "train_seconds_chosen": 138.5621886253357,
+  "neg": 4152178,
+  "pos": 1813
+}

@@ -1,0 +1,54 @@
+{
+  "dataset": "li_small",
+  "silver_table": "is459_aml_silver.li_small_transactions_small_live_03",
+  "timezone": "UTC",
+  "seed": 42,
+  "window_start": "2022-09-01 00:00:00",
+  "window_end_exclusive": "2022-09-11 00:00:00",
+  "window_start_ts": 1661990400,
+  "window_end_ts": 1662854400,
+  "tail_rule": "day rows < 10% of median daily rows",
+  "tail_days_dropped": [
+    "2022-09-11",
+    "2022-09-12",
+    "2022-09-13",
+    "2022-09-14",
+    "2022-09-15",
+    "2022-09-16",
+    "2022-09-17"
+  ],
+  "tail_rows_dropped": 223,
+  "tail_positives_dropped": 134,
+  "decision": "user chose to drop tail days (Epic 1 gate)",
+  "split_rule": "train: ts < t60; validation: t60 <= ts < t80; test: ts >= t80 (60/20/20 by row)",
+  "t60_ts": 1662471060,
+  "t80_ts": 1662653160,
+  "t60_utc": "2022-09-06 13:31",
+  "t80_utc": "2022-09-08 16:06",
+  "splits": [
+    {
+      "split": "train",
+      "rows": 4153991,
+      "positives": 1813,
+      "prevalence": 0.00043644774386848695,
+      "ts_min": 1661990400,
+      "ts_max": 1662471000
+    },
+    {
+      "split": "validation",
+      "rows": 1385006,
+      "positives": 827,
+      "prevalence": 0.0005971093266021952,
+      "ts_min": 1662471060,
+      "ts_max": 1662653100
+    },
+    {
+      "split": "test",
+      "rows": 1384829,
+      "positives": 791,
+      "prevalence": 0.0005711896559069748,
+      "ts_min": 1662653160,
+      "ts_max": 1662854340
+    }
+  ]
+}
