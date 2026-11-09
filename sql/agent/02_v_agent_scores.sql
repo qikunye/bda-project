@@ -1,4 +1,4 @@
--- Label-free BQ1 scores for the agent (PLAN.md 5.1). The agent reads this view, never the base table.
+-- Label-free BQ1 scores for the agent (docs/architecture/README.md). Materialised into agent_scores_v2 for agent reads.
 --
 -- * evaluation_is_laundering is deliberately not selected.
 -- * risk_rank_global is the stored risk_rank (one rank over the whole dataset).

@@ -1,4 +1,4 @@
--- Label-free BQ2 edges for the agent (PLAN.md 5.1, F2).
+-- Label-free BQ2 edges for the agent (docs/architecture/README.md).
 --
 -- * evaluation_is_laundering is deliberately not selected (it is in the base table).
 -- * Partitions 1-13 Sep point at v1 files and 14-16 Sep at v2 files (F3); the data ends 16 Sep 23:59 (F6).

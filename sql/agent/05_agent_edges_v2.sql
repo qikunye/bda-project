@@ -1,10 +1,10 @@
--- Materialised label-free edges for the agent's case graph (PLAN.md D13).
+-- Materialised label-free edges for the agent's case graph (docs/architecture/README.md).
 --
 -- Each edge appears twice, once per endpoint:
 --   direction = 'in'  : account_key received the payment (counterparty_key paid it)
 --   direction = 'out' : account_key made the payment (counterparty_key received it)
 -- Upstream of an alert = 'in' rows of the sender; downstream = 'out' rows of the receiver.
--- This is the same one-hop rule as the BQ2 case query (src/bq2/queries.py, PLAN.md F8).
+-- This is the same one-hop rule as the BQ2 case query (src/bq2/queries.py).
 --
 -- Bucketed by account_key, so a lookup for one account reads one bucket per day.
 -- Covers 11-16 Sep: enough for the largest window (72 h) before the earliest scored day (14 Sep).

@@ -1,9 +1,8 @@
 # Streamlit analyst dashboard
 
-Work on the `streamlit` branch. From a clean checkout, launch with:
+From the submission checkout, follow the [environment setup](../README.md#getting-started), then launch from the repository root:
 
 ```bash
-git switch streamlit
 .venv/bin/streamlit run app.py
 ```
 
@@ -45,8 +44,6 @@ from validated findings. **Advanced: Run a new AI investigation** is below the
 saved result and collapsed by default; its acknowledgement/button and independent
 session results are unchanged. No new execution occurs when inspecting evidence.
 
-See the [UX verification and screenshots](handovers/STREAMLIT_UX_VERIFICATION.md)
-for the guarded offline browser rehearsal and regression coverage.
 
 ## Offline walkthrough
 
@@ -77,13 +74,7 @@ and are **not historical end-of-day batch replays**.
 ## Live batch reads
 
 Select **Live batch (read-only)** and explicitly choose **Load / refresh queue**.
-Selecting the source alone makes no AWS calls. Bounded AWS verification on
-8 November 2026 loaded five real queue rows, compatible decision metadata and one
-saved case/trace. See the [verification report](handovers/STREAMLIT_AWS_VERIFICATION.md)
-for query costs, sampled coverage, successful Chrome and on-demand verification,
-and remaining limitations. Use the [live-demo runbook](handovers/STREAMLIT_LIVE_DEMO_RUNBOOK.md)
-for the final presentation and the [review handoff](handovers/STREAMLIT_REVIEW_READINESS.md)
-for completion status and offline regression results.
+Selecting the source alone makes no AWS calls. Historical sampled verification is recorded below.
 
 The queue reuses `tools.load_day_queue` and `AgentData`, reads decision metadata
 by key, and fetches representatives outside the visible slice when necessary.
@@ -101,7 +92,7 @@ published result; queue browsing and on-demand execution do not.
 Missing decisions, empty findings, fallback, failed reads and incompatible saved
 data have different labels. Old verdict-based records and inconsistent run IDs,
 creation times, membership or brief metadata are rejected. The S3 key stored on
-the representative is authoritative. Saved browsing performs no scans, writes or
+the representative is authoritative. Opening a saved brief performs keyed reads without table scans or
 agent runs and never falls back to demo data. Real saved daily briefs use the agent's end-of-day cutoff; each
 graph displays its own visible horizon, observation duration and cap warnings.
 These saved-data reads never run the agent.
@@ -175,11 +166,8 @@ viewer.
 
 The legacy BQ2 submit action is inaccessible from this application. No SQS reads,
 DynamoDB writes, ETL triggers or real-time pipeline execution have been added.
-Bounded live reads and exactly one separately approved live on-demand investigation
-succeeded. That approval is consumed; do not execute another investigation for a
-presentation without new approval. Historical measurements are in the verification
-report. The result is retained only in its original Streamlit session; use the
-report or clearly labelled offline samples if that session is unavailable.
+Live on-demand execution incurs Athena and Bedrock charges and requires the
+separate acknowledgement and Run action. Results remain only in that Streamlit session.
 
 On-demand permissions additionally require Bedrock model invocation for the
 configured `AGENT_MODEL_ID` and the agent's label-free Athena/Glue/S3 access.
@@ -227,18 +215,16 @@ limited listings. S3 bodies are not downloaded. The retrieval timestamp is not
 transaction freshness or processing latency. The dashboard reads stored outputs;
 it does not monitor pipeline health or start BQ2/Claude investigation.
 
-See [real-time feed integration](handovers/REALTIME_FEED_INTEGRATION.md) for exact
-writer/index/IAM changes, service bounds, eventual consistency and replay limits.
-The writer and real-time infrastructure are outside this checkout. Nothing was
-deployed, backfilled or verified live for this enhancement.
+The optional DynamoDB recent-alert GSI was **not deployed** and is **not required
+for this submission**. Leave `REALTIME_ALERTS_INDEX` unset for Saved Replay Results
+and manual lookup. Writer and infrastructure sources are outside this repository.
 
 ### Real-time contract: evidence and explicit gaps
 
 The deployed table metadata, exported writers under
 `s3://is459-aml-g1t5/rt/code/`, and two keyed alert/brief pairs were checked on
 8 November 2026. Source exports were read as text; no runner or writer was
-executed. See the [verification report](handovers/STREAMLIT_AWS_VERIFICATION.md)
-for the exact bounded operation counts and limitations.
+executed. The sampled observations and their limits are recorded below.
 
 | Item | Verified contract | Live adapter behavior |
 |---|---|---|
@@ -278,7 +264,7 @@ health or completeness claim follows from two successful reads.
 ## Final laptop rehearsal
 
 Use the existing project environment and check dependencies with
-`.venv/bin/python -m pip check`. Launch on `streamlit`, keep both source selectors
+`.venv/bin/python -m pip check`. Keep both source selectors
 in Demo, and rehearse the saved-case journey above. For a simulated on-demand
 comparison, open `txn_samplepass` and submit its original 48-hour request. Then
 run the real-time sample-session walkthrough. All three journeys work offline;
@@ -291,114 +277,119 @@ does not start a stream and does not prove that a pipeline is currently healthy.
 Keep the offline sample data available as a clearly labelled fallback selected
 by the presenter, not an automatic substitution after a live error.
 
-The external `WORK_SPLIT.md` dated 6 November documents **`python3 session.py stop`**
-after every real-time session. The exported `session.py` confirms that command, but its actual working directory
-is not established locally. If a session was started outside this dashboard, have the
-pipeline owner run that documented command from the verified runner directory;
-do not guess a directory or run it from this repository. This dashboard neither
-starts nor stops sessions. No shutdown command was executed during implementation.
+The dashboard has no real-time session controls. An externally started replay
+session must be stopped by its owner using the verified external runner directory
+and `python3 session.py stop`; the runner is not part of this checkout.
 
-## Verification
+## Presentation walkthrough (about six minutes)
+
+1. Start offline with the 14 September queue and `txn_samplefanmember`. Show
+   BQ1 order, the saved case, member graphs and a finding citation. Demo ranks,
+   scores and records are invented fixtures, not historical batch replays.
+2. For a simulated new investigation, open `txn_samplepass`, keep 48 hours and
+   run in Demo. Switch between previous and new reports; neither calls AWS.
+3. If AWS access and compatible saved publications are available, explicitly load
+   Live batch for **2022-09-14**, with five alerts. The historically verified ID is
+   `txn_613ac569efe8fc2e024adfbeae71b746`. Explain that opening it retrieves a
+   saved three-member case. Its sampled graphs showed anchors only, although
+   other account activity supported findings in the trace.
+4. Explain the advanced Live investigation controls without running them during
+   saved-results browsing. Daily briefs stop at the day's end; an on-demand
+   single-alert brief can see later data and has different membership.
+5. Open Real-Time Monitoring → Saved Replay Results → **2022-09-16** →
+   **Load Results** (20 records). Show Qwen narrative and checks, then select
+   another row without refreshing. This reads outputs of an earlier replay.
+6. Explain that BQ1 prioritises, BQ2 traces connected payments, and the agent
+   organises cited evidence. The analyst decides; synthetic patterns do not
+   establish real-world laundering performance.
+
+If Live access fails, show the error and explicitly select Demo. No source
+silently substitutes samples. Agent Examples provides nine offline scenarios.
+
+## Historical AWS verification evidence
+
+These observations were recorded on **8 November 2026**, before submission
+cleanup. They were not repeated during cleanup and do not establish current
+pipeline health, complete coverage or ongoing access.
+
+- Batch: one top-five Athena queue query returned ranks 1–5 (400,986 bytes
+  scanned, 903 ms engine time). One DynamoDB BatchGetItem returned five compatible
+  decisions, including one with no findings. A keyed case read and S3 GetObject
+  retrieved a three-member, three-finding case with fallback false. Its stored
+  envelope and full trace validated, and its native graphs rendered in Chrome.
+- A separately approved on-demand test for the batch ID above, 14 September,
+  48 hours, completed in 49.6 seconds: three validated findings, no repair or
+  fallback, ten Athena queries (130,973,587 bytes total) and three Bedrock calls.
+  The historical model was Sonnet 4.5; the current configured model is Sonnet 4.6.
+  It used 17,500 input and 2,018 output tokens, with configured estimated model
+  cost US$0.08277 excluding Athena, not a verified billing charge. Its single-alert
+  graph included one onward payment absent from the saved daily graph. The
+  result was session-only and did not overwrite the saved case. It is not a
+  durable dashboard import or a controlled comparison with the grouped batch.
+- Replay: real SDK adapters and Streamlit AppTest discovered and displayed
+  `txn_3a56e8f5ad713566b162a9def3eb4d90` and
+  `txn_5d363f8f9e859e450d511cb541d05fd5`. Both canonical DynamoDB alert/brief
+  pairs were available with explanation status `ok`; actual Qwen narrative,
+  typology and every suggested check were checked against returned records.
+  Initial Load, second Load and Refresh each made one S3 ListObjectsV2
+  (`rt/briefs/dt=2022-09-16/`, MaxKeys 20) and four DynamoDB GetItem reads:
+  **three listings and twelve keyed reads total**, zero transport retries.
+  No S3 bodies were downloaded. Selection, filtering and passive reruns made
+  zero extra reads. No demo records were substituted.
+
+Replay verification used AppTest, **not browser visual verification**. Chrome
+checks applied to the earlier batch/on-demand journeys only. Missing, malformed,
+pending and fallback replay states were tested offline, not observed in that
+live sample. No indexed discovery, index deployment, backfill, Lambda invocation
+or Kinesis session was part of the replay read check. Two successful examples
+cannot establish population-wide availability or explanation quality.
+
+## Optional indexed discovery and replay limits
+
+Saved Replay Results lists explanation keys under a historical transaction-date
+prefix, then reads the canonical alert and brief by ID. It is incomplete scoring
+coverage and is not sorted by processing time. Separate alert and brief reads
+are not a transactional snapshot; a rewrite can change an item during retrieval.
+Retrieval time is neither transaction freshness nor end-to-end processing latency.
+The real-time path is a historical-replay prototype, not continuous production
+streaming, and its Qwen interpretations are separate from validated agent findings.
+
+Discovery accepts 1–50 IDs, defaults to 20, and makes at most three logical
+listing/query requests (page size equal to the limit), then at most 100 keyed
+GetItem reads. SDK retries can add transport attempts. Invalid filenames are
+skipped; a limited listing is labelled incomplete. Local filters apply only to
+loaded records. Manual lookup accepts 1–20 known IDs. No scans are used.
+
+For a future indexed feed, the external scorer must derive string `feed_day`
+from the same numeric UTC epoch milliseconds stored as `scored_at_ms` on each
+alert write. The owning infrastructure must add `rt-alerts-by-processing-day`
+with HASH `feed_day` (S), RANGE `scored_at_ms` (N), projection KEYS_ONLY, retaining
+`txn` as the table key. Capacity must match the owning table's billing mode.
+Grant Query on that index, wait until ACTIVE, verify writer output, then set
+`REALTIME_ALERTS_INDEX=rt-alerts-by-processing-day`. Configuration alone deploys
+nothing. This optional integration is external and remains undeployed.
+
+The index uses **UTC processing dates**, not 2022 transaction dates, and is
+sorted newest first within the returned set. It is eventually consistent;
+older items without `feed_day` are absent, with no backfill included. Reprocessed
+IDs replace their canonical record, not an immutable event history. Ties at a
+limit boundary have no guaranteed global order.
+
+Saved-replay discovery needs S3 ListBucket scoped to `rt/briefs/dt=????-??-??/*`
+and GetItem on both real-time tables; it needs no S3 body reads or model invocation.
+An indexed feed additionally needs Query on the deployed index. The dashboard
+creates none of these resources.
+
+## Offline validation
 
 ```bash
-.venv/bin/pytest tests/unit/ tests/ui/ -q
+.venv/bin/python -m pytest tests
+.venv/bin/python -m pytest tests/ui -q
 .venv/bin/ruff check app.py src/ui tests/ui
 .venv/bin/python -m pip check
-git diff --check
 ```
 
-The lightweight end-to-end offline readiness check is:
-
-```bash
-.venv/bin/pytest tests/ui/test_demo_readiness.py -q
-```
-
-It exercises ranked queue selection, saved cases, graph/evidence navigation,
-member selection, provenance, explicit simulated on-demand execution and result
-switching, then completed/pending real-time records and manual refresh. All UI
-tests use fail-on-use SDK and agent guards, covering SQS, DynamoDB writes,
-Kinesis/Lambda calls and any other real SDK operation as well as Athena/Bedrock.
-
-UI tests fail on AWS client creation, SDK operations, Athena execution, Bedrock
-calls or real agent execution. Persistence tests inject fake DynamoDB/S3 objects
-and a fake Athena runner. The repository's 14 pre-existing Ruff diagnostics remain
-outside this UI change.
-
-Inject `LiveBatchService(data=fake_agent_data, saved=fake_reader)` for batch
-integration tests and `OnDemandService(runner=fake_investigate)` for execution
-tests. The latter validates using existing agent validators and returns the
-runner's result unchanged. Streamlit tests inject these through session-scoped
-`ui_batch_backends` and `ui_on_demand_services` maps. Passive navigation, separate
-cost acknowledgement, exact call counts, request identity, independent evidence
-views and safe error rendering are all tested without AWS.
-
-## Live score and navigation reliability fix
-
-Athena queue records may contain string risk scores. The shared presentation
-formatter accepts finite numeric strings, floats, integers and Decimals, and
-renders scores to four decimals. Missing/null/blank/malformed/non-finite scores
-show **Unavailable**, never an invented zero. The queue table, selected summary,
-missing-saved investigation and advanced request caption use this formatter.
-Raw source scores, IDs, BQ1 ordering and SQL remain unchanged. An entirely absent
-score column is handled as unavailable while other required queue fields retain
-their existing validation. Saved metric/amount presentation uses the same safe
-numeric handling. Real-time DynamoDB fields remain validated by their mapper.
-
-The four navigation values are now the four displayed names. Old Agent Evidence
-Brief (Demo) session state migrates to Agent Examples; obsolete Legacy BQ2 or
-unknown values resolve to Alert Queue before the keyed radio renders. Every
-supported page stops explicitly, with a final unconditional stop guarding the
-retained legacy root code. No native graph or `src/bq2/` module was removed.
-Row selection and snapshot-generation guards remain; the optional separate queue
-dropdown was removed.
-
-Offline verification: **810 unit/UI tests passed** (773 previous plus 37 focused
-score/navigation cases). New coverage includes the actual string-score failure,
-Decimal and unavailable values, an injected 20-row Live queue, selecting the
-previously verified ID from mocked data, missing-saved rendering, four routes and
-obsolete navigation migration. Source records are checked for mutation. Existing
-stale-selection and graph/evidence coverage remains in place. Tests blocked all
-real AWS/agent operations and recorded zero forbidden attempts. Touched-file
-Ruff, dependency and whitespace checks passed; 14 unrelated repository Ruff
-findings remain unchanged.
-
-The isolated Chrome walkthrough also passed: four visible navigation options,
-Demo queue → native saved graph → queue, then a clearly labelled fake Live
-backend with 20 string-score rows, native row selection and the `0.9958` selected
-summary. Opening the mocked record, visiting Real-Time Monitoring and Agent
-Examples caused no formatting exception or legacy UI fall-through. The harness
-performed no AWS/Bedrock operations; its temporary scripts remain outside Git at
-`/private/tmp/bda-queue-fix/`.
-
-## Report and lookup guidance verification
-
-The focused follow-up to `4130387` passed **836 unit/UI tests**, including 26 new
-cases for report availability, stale choices, independent evidence, local input
-validation, snapshot retention, classified read failures and old navigation state.
-**Real-Time Alert Lookup** session state safely migrates to **Real-Time Monitoring**.
-The on-demand execution implementation, agent contracts, publication and storage
-remain unchanged. The existing 14 unrelated repository Ruff findings remain;
-touched-file Ruff, dependency and whitespace checks pass.
-
-An isolated Chrome Demo walkthrough confirmed the single-report heading without
-a radio, previous/new report switching with separate evidence, the renamed page,
-pending explanations and retention of the loaded record/time after invalid input.
-Empty Live input showed actionable local guidance without calling a service.
-Both the full test run and browser guard recorded zero forbidden AWS/agent
-operations. Temporary browser harnesses/screenshots are outside Git under
-`/private/tmp/bda-report-lookup/`; no live verification or real investigation was
-repeated.
-
-## Saved replay terminology and live verification
-
-The source selector is **Data Source**. Choose **Saved Replay Results**, select
-**Transaction Date** (default **2022-09-16**) and click **Load Results**. The
-section is labelled **Replay Results**. The historical replay banner explains
-the data in plain language; S3, indexing and coverage details are in the collapsed
-**Technical Details** expander. The future indexed source retains its processing-day
-terminology and appears only when configured.
-
-[Live read verification](handovers/REALTIME_REPLAY_READ_VERIFICATION.md) confirmed
-two real transactions and their Qwen fields via SDK-backed Streamlit AppTest.
-Browser visuals were not verified. Offline tests and live observations are
-documented separately; the GSI/scorer integration remains external.
+The UI suite covers source isolation, queue selection, member/evidence navigation,
+independent saved/new reports, simulated execution, read errors and bounded replay
+pagination. It blocks real AWS and agent execution. Full results for submission
+cleanup are in the local validation report supplied with the cleanup summary.

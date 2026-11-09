@@ -23,7 +23,7 @@ AGENT_ATHENA_OUTPUT = "s3://is459-aml-g1t5/athena-results/agent/"
 
 # Days in the agent tables: from the first scored day to AGENT_LAST_DAY. The evaluated runs use
 # 16 Sep. The new-day path (state machine is459-agent-batch) sets AGENT_LAST_DAY to the ETL's day for
-# both the table rebuild and the batch, so a new day needs no code change (D43).
+# both the table rebuild and the batch, so a new day needs no code change.
 AGENT_FIRST_SCORED_DAY = "2022-09-14"
 AGENT_LAST_SCORED_DAY = date.fromisoformat(os.environ.get("AGENT_LAST_DAY", "2022-09-16")).isoformat()
 if AGENT_LAST_SCORED_DAY < AGENT_FIRST_SCORED_DAY:
@@ -71,7 +71,7 @@ AGENT_MAX_EVIDENCE_IDS = 50  # IDs one finding may cite.
 
 # The model the agent uses. Anthropic access was denied on 21 Oct and worked on 6 Nov.
 # Sonnet 4.6 since 8 Nov: Sonnet 4.5 has a fixed 27M tokens/day quota that the evaluation
-# runs hit on 7 Nov (PLAN F39). Same list price. Agreed with the team for the demo.
+# runs hit on 7 Nov (see docs/architecture/README.md). Same list price. Agreed with the team for the demo.
 AGENT_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 # The LLM loop. Every run is bounded by steps, tokens and time, and every

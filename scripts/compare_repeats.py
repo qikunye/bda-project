@@ -1,4 +1,4 @@
-"""Compares several S2 runs of the same alerts (PLAN.md section 13: "run a 50-alert subset 3 times").
+"""Compares several S2 runs of the same alerts (see docs/evaluation.md: repeatability).
 Reads no labels, so it can be done before the freeze is read against labels.
 
 Make the runs first (dry runs, nothing is saved; about US$5 each for the top 50):

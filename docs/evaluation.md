@@ -1,6 +1,6 @@
 # Running the agent evaluation
 
-Run from `bda-project/` with `.venv/bin/python` (bare `python` fails). Do the steps in order: labels are
+Run from the repository root with `.venv/bin/python`. Do the steps in order: labels are
 read only after the thresholds and prompt are frozen, and observations are marked before anyone sees labels.
 
 **What is compared.** For each of 14, 15 and 16 Sep (top 100 alerts, grouped into cases) there are two
@@ -23,12 +23,12 @@ mkdir -p runs
 ```
 
 `<day>` is `2022-09-14`, `2022-09-15` or `2022-09-16`. S1 takes about 26 minutes. S2 costs about US$11 a day and takes about 20 minutes. Keep `--spend-cap 20`: the default cap of US$10 stops a full day early.
-`run_batch` is a dry run; add `--save` only for the final runs, and note the run IDs in PLAN.md.
+`run_batch` computes without publication by default, but still incurs Athena/Bedrock charges. Add `--save` only to publish final runs, and record their run IDs with the evaluation results.
 
 Copy the summary `run_batch` prints: valid / repaired / fallback rates, observations kept and dropped,
 tokens, latency and spend.
 
-**Deeper S1 list (for per-finding rates).** The top 100 holds too few laundering alerts for per-code rates,
+**Deeper S1 list (for per-finding rates).** The top 100 is almost entirely laundering-labelled and lacks negative cases for meaningful per-code comparisons,
 so also run S1 on the top 500, several cases at a time (code only, no LLM, about 100 GB of Athena a day):
 
 ```
@@ -103,3 +103,23 @@ Keep it honest:
 - `Refusing to read labels`: pass `--confirm-frozen` after the freeze is committed.
 - `LabelLeakError`: a label reached the agent. Stop and tell the owner.
 - `ModuleNotFoundError: src`: run from `bda-project/` with `-m scripts.<name>`.
+
+## BQ2 window evaluation
+
+The four CSVs remain at the repository root to preserve the evaluation scripts'
+relative input/output paths. Run these scripts from the repository root:
+
+| Script | Input / AWS dependency | Saved output |
+|---|---|---|
+| [evaluate_bq2.py](../evaluate_bq2.py) | S3 patterns ground truth, RANDOM attempts | [sampled cases](../bq2_random_evaluation_cases.csv) |
+| [evaluate_bq2_athena.py](../evaluate_bq2_athena.py) | Sampled cases and Athena, fixed 30-hour window | [30-hour results](../bq2_30h_athena_evaluation.csv) |
+| [evaluate_bq2_windows.py](../evaluate_bq2_windows.py) | Sampled cases and Athena, 6/12/24/30/48/72-hour windows | [window summary](../bq2_window_tradeoff_evaluation.csv), [per-case detail](../bq2_window_case_results.csv) |
+
+These are the historical evaluation scripts: their Athena target remains
+`bq2_graph_edges_medium_v1`. The final agent pipeline uses v2; retaining the
+historical target preserves provenance rather than asserting a new v2 evaluation.
+Reproducing the original CSVs requires that v1 table, source pattern file, normal
+AWS access and query-result permissions. Regeneration incurs AWS charges and
+replaces the named CSVs; it is not part of offline testing. Inspect the committed
+CSVs without credentials. Do not retarget a script to v2 and label the result as
+the original experiment without separately checking parity.

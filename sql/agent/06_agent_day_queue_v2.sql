@@ -1,4 +1,4 @@
--- The top 5,000 alerts of each scored day (PLAN.md D13), for get_related_alerts, case grouping,
+-- The top 5,000 alerts of each scored day, for get_related_alerts, case grouping,
 -- the batch runner and the Streamlit queue. About 15k rows, so reading a whole day costs < 1 MB.
 -- agent_scores_v2 is bucketed by transaction_id, which scatters top ranks across every file, so a
 -- "risk_rank_day <= K" query on it reads the whole day (about 225 MB).

@@ -1,4 +1,4 @@
--- Materialised label-free alert table for the agent (PLAN.md D8, D13).
+-- Materialised label-free alert table for the agent (docs/architecture/README.md).
 --
 -- One row per scored transaction, with what get_alert and get_neighbour_scores need in one place:
 -- score, global and per-day rank (test rows only), payment details, and BQ1 reasons (top 1% only,

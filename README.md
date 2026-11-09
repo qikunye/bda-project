@@ -1,6 +1,6 @@
 # IS459 anti-money-laundering alert investigation
 
-An end-to-end big data pipeline that helps an analyst decide which payments to review, what they connect to, and what the money did around them.
+The investigation and dashboard components of a big data pipeline that helps an analyst decide which payments to review, what they connect to, and what the money did around them.
 
 It uses the synthetic IBM AML dataset (LI-Medium: 31.25M transactions, 16,041 labelled as laundering). The figures below show how well the system recovers a synthetic pattern. They are not real-world detection performance.
 
@@ -25,16 +25,18 @@ DAILY      Raw CSV
              → agent briefs each case
              → DynamoDB + S3 traces → Streamlit
 
-ON DEMAND  Analyst's Investigate button → same agent on one alert → Streamlit
+ON DEMAND  Analyst's Investigate button → same agent on one alert → session-only result
 
 REAL-TIME  Kinesis → Lambda is459-rt-scorer (same BQ1 model)
              → is459_rt_alerts → is459-rt-explainer → is459_rt_briefs → Streamlit
-             Display only: it doesn't go through the agent.
+             Historical replay prototype; saved outputs only in the dashboard, separate from the agent.
 ```
 
 Everything runs in AWS `us-east-1`: S3 for storage, Glue and Athena for the ETL and queries, Step Functions and Fargate for orchestration, Bedrock for the LLM, DynamoDB for results.
 
-This repository holds the investigation agent, the serving code around BQ1 and BQ2, the evaluation, the deployment of the agent batch, and the Streamlit dashboard. The ETL, BQ1 training and feature engineering, and the real-time writers live elsewhere.
+This repository holds the investigation agent, the serving code around BQ1 and BQ2, the evaluation, the deployment of the agent batch, and the Streamlit dashboard. The ETL, BQ1 training and feature engineering, and the real-time writers live elsewhere; this checkout cannot deploy the entire platform from scratch.
+
+[Architecture decisions and limitations](docs/architecture/README.md) records data boundaries, scaling constraints and verification limits. An approved final architecture image was not available; the textual architecture above is the submission reference.
 
 ## BQ1: alert prioritisation
 
@@ -117,7 +119,7 @@ What the agent adds:
 
 ## Streamlit dashboard
 
-The analyst dashboard starts in **Demo (offline)** mode, which needs no credentials. **Live batch (read-only)** reads the saved briefs from DynamoDB and S3 after an explicit load. Pages: Alert Queue, Investigation, Real-Time Alert Lookup and Agent Examples. See [docs/streamlit_dashboard.md](docs/streamlit_dashboard.md).
+The analyst dashboard starts in **Demo (offline)** mode, which needs no credentials. **Live batch (read-only)** reads the saved briefs from DynamoDB and S3 after an explicit load. Pages: Alert Queue, Investigation, Real-Time Monitoring and Agent Examples. **Saved Replay Results** discovers stored explanation keys for a historical transaction date, then retrieves paired DynamoDB alerts and Qwen briefs. It is neither a chronological processing feed nor complete scoring coverage. The optional DynamoDB recent-alert GSI was not deployed and is not required for submission. See [docs/streamlit_dashboard.md](docs/streamlit_dashboard.md).
 
 ## Repository layout
 
@@ -162,11 +164,16 @@ python -m pip install -r requirements.txt
 # Analyst dashboard; starts in Demo (offline). Select Live explicitly for AWS reads.
 .venv/bin/streamlit run app.py
 
-# Unit tests, with no AWS access or paid calls. Bare `pytest` fails on a name clash.
+# Full offline unit and Streamlit regression suite; no AWS access or paid calls.
 .venv/bin/python -m pytest tests
+
+# Streamlit regressions separately
+.venv/bin/python -m pytest tests/ui -q
 ```
 
-The evaluation needs access to labels and is run with `python -m scripts.run_evaluation`.
+The agent evaluation needs access to labels and is run with `python -m scripts.run_evaluation`; see the [evaluation procedure](docs/evaluation.md). Saved results are documented in [evaluation results](docs/evaluation_results.md). The root BQ2 CSVs stay beside the scripts that read/write them; their [reproduction steps and historical v1 dependency](docs/evaluation.md#bq2-window-evaluation) are documented separately.
+
+Live queue reads require Athena/Glue/S3 and keyed DynamoDB access; saved briefs require DynamoDB and S3 traces. On-demand investigations additionally invoke Bedrock and incur charges. The default offline demo and tests require none of these services.
 
 ## Deployment
 
@@ -182,4 +189,4 @@ The Streamlit dashboard is run locally with `streamlit run app.py` and reads the
 
 ### Agent batch
 
-`infra/deploy.sh` builds the batch image and creates the Fargate task, the IAM roles, the state machine and the EventBridge target that starts a run when the ETL succeeds. `DRY_RUN=1 infra/deploy.sh` prints every command and changes nothing, and `infra/destroy.sh` removes it all. The batch role can read only the label-free tables. The table-rebuild role can read Gold, and never runs the LLM. Details: [infra/README.md](infra/README.md).
+`infra/deploy.sh` builds the batch image and creates the Fargate task, the IAM roles, the state machine and the EventBridge target that starts a run when the ETL succeeds. `DRY_RUN=1 infra/deploy.sh` prints every command and changes nothing, and `infra/destroy.sh` removes it all. The batch role can read only the label-free tables. The workflow first rebuilds tables, then runs investigations; both stages receive the ETL day via `AGENT_LAST_DAY`. New days must run one at a time. A 17 September check reached investigation but stopped at the model quota before saving; a fully saved new-day run remains unverified. The table-rebuild role can read Gold, and never runs the LLM. Details: [infra/README.md](infra/README.md).

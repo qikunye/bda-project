@@ -1,6 +1,6 @@
 """Runs the code-only brief (S1) on a deeper slice of one day's queue, several cases at a time.
 
-PLAN.md section 13: per-finding laundering rates need more positives than the top 100 holds, so
+As described in docs/evaluation.md, the top 100 lacks negative cases for per-finding rates, so
 S1 runs on the top 500 (or more) while S2 stays on the top 100. Same rules, same end-of-day cutoff
 and same output shape as run_s1, plus each case's BQ1 rank so the evaluation can band by rank.
 Reads no labels and calls no LLM; spends only on Athena (about 100 GB, US$0.5, for a top 500).
