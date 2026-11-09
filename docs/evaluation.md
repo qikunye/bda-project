@@ -106,14 +106,15 @@ Keep it honest:
 
 ## BQ2 window evaluation
 
-The four CSVs remain at the repository root to preserve the evaluation scripts'
-relative input/output paths. Run these scripts from the repository root:
+Scripts and checked-in CSVs are consolidated in [evaluations/bq2](../evaluations/bq2/README.md).
+Default input and output paths resolve beside each script, independently of the
+working directory. Run the scripts from the repository root as documented there:
 
 | Script | Input / AWS dependency | Saved output |
 |---|---|---|
-| [evaluate_bq2.py](../evaluate_bq2.py) | S3 patterns ground truth, RANDOM attempts | [sampled cases](../bq2_random_evaluation_cases.csv) |
-| [evaluate_bq2_athena.py](../evaluate_bq2_athena.py) | Sampled cases and Athena, fixed 30-hour window | [30-hour results](../bq2_30h_athena_evaluation.csv) |
-| [evaluate_bq2_windows.py](../evaluate_bq2_windows.py) | Sampled cases and Athena, 6/12/24/30/48/72-hour windows | [window summary](../bq2_window_tradeoff_evaluation.csv), [per-case detail](../bq2_window_case_results.csv) |
+| [evaluate_bq2.py](../evaluations/bq2/evaluate_bq2.py) | S3 patterns ground truth, RANDOM attempts | [sampled cases](../evaluations/bq2/bq2_random_evaluation_cases.csv) |
+| [evaluate_bq2_athena.py](../evaluations/bq2/evaluate_bq2_athena.py) | Sampled cases and Athena, fixed 30-hour window | [30-hour results](../evaluations/bq2/bq2_30h_athena_evaluation.csv) |
+| [evaluate_bq2_windows.py](../evaluations/bq2/evaluate_bq2_windows.py) | Sampled cases and Athena, 6/12/24/30/48/72-hour windows | [window summary](../evaluations/bq2/bq2_window_tradeoff_evaluation.csv), [per-case detail](../evaluations/bq2/bq2_window_case_results.csv) |
 
 These are the historical evaluation scripts: their Athena target remains
 `bq2_graph_edges_medium_v1`. The final agent pipeline uses v2; retaining the

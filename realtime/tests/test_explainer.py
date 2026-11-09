@@ -1,7 +1,9 @@
 """Local tests for the explainer: input allowlist (no label can leak), grounding checker, schema checks, template fallback,
 duplicate SQS delivery (one row), and the handler end to end with a fake model, classifier, Athena and DynamoDB."""
 import json, sys, types, math
-sys.path.insert(0, '.')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import explainer_common as E
 
 row = {'risk_score': 0.81234, 'amount_paid': '12491.16', 'payment_format': 'ACH', 'payment_currency': 'US Dollar', 'receiving_currency': 'US Dollar',

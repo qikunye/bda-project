@@ -19,8 +19,9 @@ ATHENA_DATABASE = "is459_aml_gold"
 ATHENA_TABLE = "is459_aml_gold.bq2_graph_edges_medium_v1"
 ATHENA_OUTPUT = "s3://is459-aml-g1t5/athena-results/bq2/"
 
-INPUT_PATH = Path("bq2_random_evaluation_cases.csv")
-OUTPUT_PATH = Path("bq2_30h_athena_evaluation.csv")
+EVAL_DIR = Path(__file__).resolve().parent
+INPUT_PATH = EVAL_DIR / "bq2_random_evaluation_cases.csv"
+OUTPUT_PATH = EVAL_DIR / "bq2_30h_athena_evaluation.csv"
 WINDOW_MINUTES = 1800
 BATCH_SIZE = 200
 POLL_INTERVAL_SECONDS = 0.5

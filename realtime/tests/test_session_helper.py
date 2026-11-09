@@ -1,4 +1,8 @@
 """Local test of session_helper with moto: drain counting, briefs waiting, stop idempotency, summary and reaper decisions."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import os, json, time, io, zipfile
 os.environ.update(AWS_DEFAULT_REGION='us-east-1', AWS_ACCESS_KEY_ID='x', AWS_SECRET_ACCESS_KEY='x')
 from moto import mock_aws

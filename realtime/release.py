@@ -33,7 +33,7 @@ def finish(ok, note):
     sys.exit(0 if ok else 1)
 
 
-step('unit tests', 'python3 test_local.py && RT_SKIP_MODEL=1 python3 test_handler.py && python3 test_explainer.py')
+step('unit tests', 'python3 tests/test_local.py && RT_SKIP_MODEL=1 python3 tests/test_handler.py && python3 tests/test_explainer.py')
 step('ecr login', 'aws ecr get-login-password --region %s | docker login --username AWS --password-stdin %s' % (R, REG))
 if '--scorer' in sys.argv:
     step('build scorer', 'docker build -q -t is459-rt-scorer:rel .')

@@ -19,9 +19,10 @@ ATHENA_DATABASE = "is459_aml_gold"
 ATHENA_TABLE = "is459_aml_gold.bq2_graph_edges_medium_v1"
 ATHENA_OUTPUT = "s3://is459-aml-g1t5/athena-results/bq2/"
 
-INPUT_PATH = Path("bq2_random_evaluation_cases.csv")
-SUMMARY_OUTPUT_PATH = Path("bq2_window_tradeoff_evaluation.csv")
-DETAIL_OUTPUT_PATH = Path("bq2_window_case_results.csv")
+EVAL_DIR = Path(__file__).resolve().parent
+INPUT_PATH = EVAL_DIR / "bq2_random_evaluation_cases.csv"
+SUMMARY_OUTPUT_PATH = EVAL_DIR / "bq2_window_tradeoff_evaluation.csv"
+DETAIL_OUTPUT_PATH = EVAL_DIR / "bq2_window_case_results.csv"
 
 WINDOWS_HOURS = (6, 12, 24, 30, 48, 72)
 MAX_WINDOW_MINUTES = max(WINDOWS_HOURS) * 60

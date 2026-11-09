@@ -2,7 +2,9 @@
 must leave state and features identical to one clean sequential pass."""
 import os, sys, json, base64, random, copy
 os.environ['RT_SKIP_MODEL'] = '1'
-sys.path.insert(0, '.')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import rt_core as C
 import test_local as T  # synthetic rows, history, slice, bootstrap helpers
 from bootstrap_logic import build_items, aggregate_python

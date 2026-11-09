@@ -35,10 +35,6 @@ Workstream D (graph features for BQ1) is on hold, as the team agreed, because of
 
 The account is a member of a payer (management) account, so cost-allocation tags cannot be turned on from this account. ETL v2 cost is measured from the Glue job-run DPU-seconds of every `is459_etl_v2_*` job plus Kinesis, Firehose and Athena usage. AWS Budgets alerts are set up for the account.
 
-## 8. Not ours
-
-Four stopped t2.micro instances with 20 GB gp2 volumes are not part of ETL v2 and were left alone. Their storage shows up under Cost Explorer's "EC2 - Other" line, which is US$4.20 of October's spend so far. The team should delete them in the Week 14 cleanup if nobody needs them.
-
 ## 9. Reading the day straight from the raw CSV
 
 The stream replay sent Silver-shaped rows (exported from v1 Silver), so the CSV path is a real re-implementation of the v1 Bronze-to-Silver transform. It is a port of the v1 job's code (`silver/ibm-aml/deployment/v20261004_18`), not a rewrite:
@@ -52,6 +48,35 @@ The source proof (rows, unique ids, exact totals per currency) is computed from 
 
 The BQ1 and BQ2 day jobs used to check each day against the replay's pinned source export. They now read the audit job's result file instead (`--source-proof-key`): same row count, same id hash algorithm, same exact totals, and the same published snapshot. Their 14 to 16 Sep whitelist became "any day in Sep 2022"; the Gold commit watermark still refuses a committed day.
 
-## 10. 18 Sep is kept for the live recording (8 Nov 2026)
+## 10. Chronological loads and agent integration
 
-18 to 27 Sep were proved on 7 Nov and rolled back, so the next pipeline run is 18 Sep and can be recorded from start to finish. The run also starts the agent through `is459-etl-v2-day-succeeded`. The SQS target `agent-queue` on that rule is left in place but unused; the agent owner removes it with the queue and its DLQ.
+The audit rejects a day already present in Silver. Gold commit recognises known
+`load_id`s and refuses a new load for any day at or before the ledger watermark.
+Changing the load ID cannot make a committed day safe to append. The input
+contract remains `{day, day_compact, run_tag, source_csv_key}`; `BuildIds` uses
+the compact date and tag to derive run/branch names and
+`full-day-<day_compact>-<run_tag>`. Run new days in order.
+
+The 18–27 September backfill and rollback are historical pipeline evidence, not
+model performance evidence; see [the execution record](evidence.md#backfill-and-rollback-of-18-to-27-sep-7-nov-2026).
+
+The ETL success event carries the input JSON string in `detail.input`. The agent
+state machine parses the day itself, then rebuilds label-free tables and runs
+investigations. The current submission path uses the Fargate target from
+[infra](../../infra/README.md), not the older SQS hook. The legacy
+`deploy_agent_hooks.py` remains historical integration code and must not be
+confused with the current investigation deployment.
+
+## 11. Daily versus real-time processing
+
+Daily ETL reads the raw Bronze CSV and creates no Kinesis or Firehose resources.
+It provides the authoritative daily Silver/Gold outputs. The separate real-time
+prototype replays Silver slices through Kinesis and a Lambda scorer with the
+same frozen model and feature semantics. Its explainer and session orchestrator
+are implemented; they are not pending additions. See [real-time documentation](../../realtime/README.md).
+
+The source proof comes from the same CSV as the parser, so it detects dropped or
+duplicated rows but cannot alone detect an incorrect parse. Independent all-column
+parity and local synthetic tests supply that evidence. At larger scale, repeatedly
+reading the all-days CSV becomes a cost limitation; pre-partitioning the source
+by day is a possible future change, not an implemented feature.

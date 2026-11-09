@@ -1,6 +1,10 @@
+> Historical execution evidence; no AWS checks were rerun for repository organisation.
+> Run shell commands from `etl_v2/`. Relative `results/etl-v2/` paths in this document
+> denote S3 keys under `s3://is459-aml-g1t5/`, not checked-in local files.
+
 # IS459 G1T5: ETL v2 Verification Evidence
 
-All checks were run against the live AWS account (us-east-1) on 17 Oct 2026 (UTC) with Athena, Glue, Step Functions and S3 result files. Raw run results are in `s3://is459-aml-g1t5/results/etl-v2/` (`gold-commit/`, `bq1/staged/`, `bq2-staged/`, `live-audit/`, `live-publish/`, `stream/`). The Athena checks for any day can be rerun with `./validate_day.sh <day>`; the outputs for 15 and 16 Sep are kept as `logs/validate15.log` and `logs/validate16.log` in the team CloudShell.
+The initial checks were run against the live AWS account (us-east-1) on 17 Oct 2026 (UTC); later checks are dated in their sections with Athena, Glue, Step Functions and S3 result files. Raw run results are in `s3://is459-aml-g1t5/results/etl-v2/` (`gold-commit/`, `bq1/staged/`, `bq2-staged/`, `live-audit/`, `live-publish/`, `stream/`). The Athena checks for any day can be rerun with `./validate_day.sh <day>`; the outputs for 15 and 16 Sep are kept as `logs/validate15.log` and `logs/validate16.log` in the team CloudShell.
 
 ## Checklist (plan items, with graph features paused)
 
@@ -65,7 +69,7 @@ Account-wide October spend in Cost Explorer was US$10.75 on 17 Oct (it lags abou
 
 ## CSV cutover (24 Oct 2026)
 
-The daily lane now reads each day from `bronze/ibm-aml/li-medium/transactions/LI-Medium_Trans.csv` (ETL_Final_Plan.md D1 to D8). Committed days were not rerun. The parse was proved on them with `--mode parse-test`, which never creates a branch, and the whole path was proved on 17 Sep, the first day after the ledger watermark.
+The daily lane now reads each day from `bronze/ibm-aml/li-medium/transactions/LI-Medium_Trans.csv` (see [CSV design decisions](decisions.md#9-reading-the-day-straight-from-the-raw-csv)). Committed days were not rerun. The parse was proved on them with `--mode parse-test`, which never creates a branch, and the whole path was proved on 17 Sep, the first day after the ledger watermark.
 
 **Parse parity on committed days** (`./parse_test.sh <day>`, results in `results/etl-v2/parse-test/<day>/`)
 

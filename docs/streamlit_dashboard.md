@@ -217,7 +217,7 @@ it does not monitor pipeline health or start BQ2/Claude investigation.
 
 The optional DynamoDB recent-alert GSI was **not deployed** and is **not required
 for this submission**. Leave `REALTIME_ALERTS_INDEX` unset for Saved Replay Results
-and manual lookup. Writer and infrastructure sources are outside this repository.
+and manual lookup. Writer and infrastructure sources are in [realtime](../realtime/README.md).
 
 ### Real-time contract: evidence and explicit gaps
 
@@ -278,8 +278,8 @@ Keep the offline sample data available as a clearly labelled fallback selected
 by the presenter, not an automatic substitution after a live error.
 
 The dashboard has no real-time session controls. An externally started replay
-session must be stopped by its owner using the verified external runner directory
-and `python3 session.py stop`; the runner is not part of this checkout.
+session must be stopped by its owner using `python3 session.py stop` from
+`realtime/` (the runner directory in this checkout).
 
 ## Presentation walkthrough (about six minutes)
 
@@ -360,14 +360,14 @@ GetItem reads. SDK retries can add transport attempts. Invalid filenames are
 skipped; a limited listing is labelled incomplete. Local filters apply only to
 loaded records. Manual lookup accepts 1–20 known IDs. No scans are used.
 
-For a future indexed feed, the external scorer must derive string `feed_day`
+For a future indexed feed, the scorer in `realtime/app.py` must derive string `feed_day`
 from the same numeric UTC epoch milliseconds stored as `scored_at_ms` on each
 alert write. The owning infrastructure must add `rt-alerts-by-processing-day`
 with HASH `feed_day` (S), RANGE `scored_at_ms` (N), projection KEYS_ONLY, retaining
 `txn` as the table key. Capacity must match the owning table's billing mode.
 Grant Query on that index, wait until ACTIVE, verify writer output, then set
 `REALTIME_ALERTS_INDEX=rt-alerts-by-processing-day`. Configuration alone deploys
-nothing. This optional integration is external and remains undeployed.
+nothing. This optional integration remains undeployed; the writer source is now included.
 
 The index uses **UTC processing dates**, not 2022 transaction dates, and is
 sorted newest first within the returned set. It is eventually consistent;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy the CSV-sourced daily lane (ETL_Final_Plan.md D1 to D7). Run from ~/etlv2 in CloudShell.
+"""Deploy the CSV-sourced daily lane (docs/decisions.md, CSV design). Run from ~/etlv2 in CloudShell.
 
   python3 deploy_csv.py audit     # upload silver_audit_dq_job.py, point is459_etl_v2_job-silver-audit-dq at it,
                                   # let the Glue role read the raw CSV and write parse-test results

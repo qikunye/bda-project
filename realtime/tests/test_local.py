@@ -1,6 +1,8 @@
 """Local check: brute-force Spark-window semantics vs bootstrap + per-record engine, on synthetic data with heavy ties."""
 import random, math, sys
-sys.path.insert(0, '.')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import rt_core as C
 from bootstrap_logic import build_items, aggregate_python
 

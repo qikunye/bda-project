@@ -18,6 +18,22 @@ How to set up, run and tear down the v2 daily ETL pipeline (batch, read straight
 
 Gold tables read by the app (Athena, database `is459_aml_gold`): `bq1_risk_scores_medium_v2`, `bq1_features_medium_v2`, `bq2_graph_edges_medium_v2`, all partitioned by `txn_date`.
 
+## Working directory and deployment dependencies
+
+Run commands from the repository's `etl_v2/` directory (or an equivalent CloudShell
+copy). Documentation lives in `docs/` relative to that directory. These are
+operational scripts for the existing project environment, not a complete platform
+bootstrap. `deploy_etl_v2.py` reads an absent historical template
+`src/is459_etl_v2_job-bq1-full-20220914.py` and clones existing Glue job
+definitions. `deploy_csv.py` patches additional existing job/Lambda sources and
+expects an `out` directory. Review the code and restore its external inputs
+before deployment; source data, frozen model/schema, Iceberg state/catalog, roles
+and earlier jobs remain AWS prerequisites. No deployment is required to inspect
+the evidence.
+
+Related documents: [decisions](decisions.md), [execution evidence](evidence.md),
+[operational utility classification](../review/README.md).
+
 ## Run one day end to end (CloudShell)
 
 No replay, no Kinesis, no Firehose. A day is one state machine run (about 20 minutes).
@@ -34,9 +50,9 @@ No replay, no Kinesis, no Firehose. A day is one state machine run (about 20 min
    The state machine input is `{day, day_compact, run_tag, source_csv_key}`. `load_id` is still `full-day-<day_compact>-<run_tag>`.
 2. Watch it in the Step Functions console, then check it with `./validate_day.sh 2022-09-17` (read-only Athena checks against v1, the source proof, and a check that no Kinesis stream or Firehose exists apart from the real-time stream during an RT session).
 3. Only days after the ledger watermark can be loaded (14 to 17 Sep are committed; Gold commit refuses a new load for them). The audit job also refuses a day that is already in Silver `main`. The next day to load is **18 Sep**, kept for the recorded live run (see "Current state" below).
-4. A successful run also fires the agent: the EventBridge rule `is459-etl-v2-day-succeeded` starts the agent's Step Functions machine `is459-agent-batch` (agent PLAN D40). Its old second target, SQS `is459-etl-v2-day-ready`, is still attached but nothing reads it.
+4. A successful run also fires the agent: the EventBridge rule `is459-etl-v2-day-succeeded` starts the agent's Step Functions machine `is459-agent-batch`. The current agent deployment is documented in [infra](../../infra/README.md); the older SQS hook is historical and unused by the agent.
 
-## Current state (8 Nov 2026)
+## Historically verified state (8 Nov 2026)
 
 - Committed: 14, 15, 16, 17 Sep. Silver `main` and the ledger hold 31,250,493 rows (5 loads).
 - 18 to 27 Sep were loaded and checked on 7 Nov, then rolled back the same day so 18 Sep can be recorded live (evidence: "Backfill and rollback").
@@ -53,7 +69,7 @@ python3 review/deploy_backfill.py status
 
 ## Review scripts (read-only unless stated)
 
-In `review/`, also in `s3://is459-aml-g1t5/exported/etl-v2/final/review/`. All read-only except `deploy_backfill.py` and `rollback_days_job.py`.
+In `review/`, also in `s3://is459-aml-g1t5/exported/etl-v2/final/review/`. `status.sh`, `validate_range.sh` and `review_checks.sh` inspect AWS and may incur query charges. `deploy_backfill.py` and `rollback_days_job.py` mutate resources/data. `fetch_agent_code.sh` downloads code into local directories. None are offline tests.
 
 | Script | What it does |
 |---|---|
@@ -88,3 +104,16 @@ Delete everything tagged `project=is459-g1t5-etl-v2` (Glue jobs, Lambdas, state 
 ## Retired (24 Oct 2026)
 
 `is459_etl_v2_job-stream-replay` and `is459_etl_v2_job-reconcile-day14-exact` were deleted by `deploy_csv.py retire`. Their job definitions and scripts are saved under `results/etl-v2/csv-cutover/202610241450/jobs/`, and their run results stay under `results/etl-v2/managed-replay/` and `results/etl-v2/stream/` as evidence for how 14 to 16 Sep were loaded.
+
+## Offline local parser test
+
+From the repository root, with PySpark and a compatible Java installation available:
+
+```bash
+.venv/bin/python etl_v2/tests/test_parse_local.py
+```
+
+This synthetic parser test does not use AWS. It is not included by the root
+`pytest.ini` (`testpaths = tests`). The Streamlit requirements do not install
+PySpark; a missing PySpark/Java runtime is a local test prerequisite, not a
+reason to run the Glue job instead.

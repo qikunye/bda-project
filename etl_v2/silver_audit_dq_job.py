@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ETL v2 daily lane, step 2: one day from the raw Bronze CSV -> Silver v2 audit branch + source proof + Glue DQ.
 
-Replaces the stream-landing audit job (ETL_Final_Plan.md D1 to D4). No Kinesis, no Firehose, no bronze/stream/.
+Replaces the stream-landing audit job (docs/decisions.md, CSV parsing). No Kinesis, no Firehose, no bronze/stream/.
 
 --mode audit       (state machine) parse the run day from LI-Medium_Trans.csv, prove it against the CSV (source proof),
                    MERGE it into a new audit_* branch forked from main, run the 11 DQ rules, write

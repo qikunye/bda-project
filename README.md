@@ -34,7 +34,7 @@ REAL-TIME  Kinesis → Lambda is459-rt-scorer (same BQ1 model)
 
 Everything runs in AWS `us-east-1`: S3 for storage, Glue and Athena for the ETL and queries, Step Functions and Fargate for orchestration, Bedrock for the LLM, DynamoDB for results.
 
-This repository holds the investigation agent, the serving code around BQ1 and BQ2, the evaluation, the deployment of the agent batch, and the Streamlit dashboard. The ETL, BQ1 training and feature engineering, and the real-time writers live elsewhere; this checkout cannot deploy the entire platform from scratch.
+This repository contains daily ETL v2 source (`etl_v2/`), BQ1 feature engineering/training and saved research results (`src/bq1/`), the real-time scorer/explainer and session tooling (`realtime/`), the investigation agent, evaluation and Streamlit dashboard. The checkout supports offline dashboard/agent tests and source inspection, but deployment still depends on existing project AWS resources, source data and frozen model assets; it is not a complete platform bootstrap.
 
 [Architecture decisions and limitations](docs/architecture/README.md) records data boundaries, scaling constraints and verification limits. An approved final architecture image was not available; the textual architecture above is the submission reference.
 
@@ -64,7 +64,7 @@ BQ2 turns transactions into directed payment edges and looks one hop around an a
 - **Upstream:** payments into the alert's sender before the alert.
 - **Downstream:** payments out of the alert's receiver after the alert.
 
-The default window is 48 hours, chosen from an evaluation on sampled laundering-pattern alerts ([results](bq2_window_tradeoff_evaluation.csv)). At 48 hours, 89% of cases recovered both the upstream and downstream partner, with a median of 3 candidate accounts. Going from 24 to 48 hours raised that from 70%, and 72 hours reached 98% with more payments to review.
+The default window is 48 hours, chosen from an evaluation on sampled laundering-pattern alerts ([results](evaluations/bq2/bq2_window_tradeoff_evaluation.csv)). At 48 hours, 89% of cases recovered both the upstream and downstream partner, with a median of 3 candidate accounts. Going from 24 to 48 hours raised that from 70%, and 72 hours reached 98% with more payments to review.
 
 ## Investigation agent
 
@@ -88,7 +88,7 @@ and writes a short brief, using at most 8 tool steps.
 
 Design safeguards:
 
-- **No labels.** The agent reads label-free tables through an allowlist of columns, and a label reaching it stops the run. Only the evaluation module reads labels, and the agent never imports it.
+- **No labels.** The agent reads label-free tables through an allowlist of columns, and a label reaching it stops the run. Within the investigation workflow, only the evaluation module reads labels, and the agent never imports it. Separate ETL, model-training and BQ2 evaluation code has its own ground-truth access.
 - **No BQ1 reasons.** They carry almost no information, so the agent never sees them and the dashboard does not show them.
 - **Checked evidence.** A finding the LLM claims is accepted only if the same fixed rules, run by code, also find it in that run's tool results. Code checks every cited payment ID, and the displayed sentences take their numbers from tool results, not from the LLM.
 - **Nothing lost.** No alert is removed or reordered. The analyst's list is the BQ1 queue, with the brief attached.
@@ -127,8 +127,8 @@ The analyst dashboard starts in **Demo (offline)** mode, which needs no credenti
 |---|---|
 | `app.py`, `src/ui/` | Streamlit navigation, ranked queue, saved and on-demand briefs, graphs, evidence navigation, real-time monitoring and offline samples |
 | `src/agent/` | Tools, case grouping, code-only baseline, LLM loop, validator, batch runner and storage |
-| `src/evaluation/` | Evaluation: the only code that reads labels |
-| `src/bq1/`, `src/shared/` | BQ1 score lookup (not used by the agent) |
+| `src/evaluation/` | Investigation evaluation, with label access isolated from agent runtime |
+| `src/bq1/`, `src/shared/` | BQ1 serving helpers, feature engineering, training/scoring code, Glue packaging, saved LI-Small and tail-day results (agent reads separate label-free tables) |
 | `src/bq2/queries.py` | BQ2 case query, used to check that the agent's edges match it |
 | `src/bq2/evidence.py`, `transforms.py` | Structured evidence and transformations from BQ2 edges (not used by the agent) |
 | `src/aws/athena.py` | Athena execution |
@@ -136,7 +136,9 @@ The analyst dashboard starts in **Demo (offline)** mode, which needs no credenti
 | `sql/bq1/`, `sql/agent/` | BQ1 queries; builders for the label-free agent tables |
 | `scripts/` | Run the batch, the code-only baseline, samples and the evaluation, and rebuild tables |
 | `infra/` | Deploys the Fargate batch and its trigger (Dockerfile, state machine, IAM roles, `deploy.sh`, `destroy.sh`). See [infra/README.md](infra/README.md) |
-| `evaluate_bq2*.py` and CSVs | BQ2 window evaluation |
+| `evaluations/bq2/` | Historical BQ2 evaluation scripts, CSVs and [reproduction guide](evaluations/bq2/README.md) |
+| `etl_v2/` | Daily ETL jobs, orchestration/deployment utilities, local parser test and [permanent documentation](etl_v2/docs/runbook.md) |
+| `realtime/` | Kinesis scorer/explainer, replay/session orchestration, Dockerfiles, release gates and [local tests](realtime/tests/README.md) |
 | `tests/` | Unit and UI tests |
 | `docs/` | The dashboard guide, the output contract and the evaluation |
 
@@ -171,7 +173,7 @@ python -m pip install -r requirements.txt
 .venv/bin/python -m pytest tests/ui -q
 ```
 
-The agent evaluation needs access to labels and is run with `python -m scripts.run_evaluation`; see the [evaluation procedure](docs/evaluation.md). Saved results are documented in [evaluation results](docs/evaluation_results.md). The root BQ2 CSVs stay beside the scripts that read/write them; their [reproduction steps and historical v1 dependency](docs/evaluation.md#bq2-window-evaluation) are documented separately.
+The agent evaluation needs access to labels and is run with `python -m scripts.run_evaluation`; see the [evaluation procedure](docs/evaluation.md). Saved results are documented in [evaluation results](docs/evaluation_results.md). BQ2 scripts and CSVs are together in [evaluations/bq2](evaluations/bq2/README.md), with working-directory-independent paths and the historical v1 Athena dependency documented.
 
 Live queue reads require Athena/Glue/S3 and keyed DynamoDB access; saved briefs require DynamoDB and S3 traces. On-demand investigations additionally invoke Bedrock and incur charges. The default offline demo and tests require none of these services.
 
@@ -190,3 +192,43 @@ The Streamlit dashboard is run locally with `streamlit run app.py` and reads the
 ### Agent batch
 
 `infra/deploy.sh` builds the batch image and creates the Fargate task, the IAM roles, the state machine and the EventBridge target that starts a run when the ETL succeeds. `DRY_RUN=1 infra/deploy.sh` prints every command and changes nothing, and `infra/destroy.sh` removes it all. The batch role can read only the label-free tables. The workflow first rebuilds tables, then runs investigations; both stages receive the ETL day via `AGENT_LAST_DAY`. New days must run one at a time. A 17 September check reached investigation but stopped at the model quota before saving; a fully saved new-day run remains unverified. The table-rebuild role can read Gold, and never runs the LLM. Details: [infra/README.md](infra/README.md).
+
+### Reproducibility and remaining inputs
+
+- **Daily ETL:** [runbook](etl_v2/docs/runbook.md), [decisions](etl_v2/docs/decisions.md)
+  and [execution evidence](etl_v2/docs/evidence.md). Jobs, Lambda sources and the
+  state machine are included. Deployment utilities update an existing project
+  environment: they clone prior Glue jobs and patch S3 job sources. The historical
+  full-day BQ1 template read by `deploy_etl_v2.py` is absent locally. Restoring
+  existing job/catalog/state resources and original templates is required before
+  a clean deployment; the repository does not supply that bootstrap.
+- **BQ1 training:** source, packaging scripts, LI-Small model/results and Medium
+  tail-day evidence are under `src/bq1/`. Running training needs PySpark/Java,
+  scikit-learn/XGBoost and original Silver datasets beyond the root dashboard
+  requirements. The deployed frozen LI-Medium model/schema and ETL incremental
+  library remain S3 dependencies; the checked-in Small model is not a replacement.
+- **Real time:** [source and operational guide](realtime/README.md). Container
+  recipes, writers and session tooling are included. Frozen XGBoost model/schema,
+  Qwen GGUF/classifier assets, teacher references and replay/Gold comparison data
+  remain external S3/Kaggle/run artefacts. Release and live evaluation invoke AWS;
+  they are not offline verification commands.
+
+Root `pytest.ini` limits discovery to `tests/`. Run the additional local suites
+explicitly; [real-time test prerequisites](realtime/tests/README.md) distinguish
+mocked checks from model parity gates:
+
+```bash
+# Needs PySpark and compatible Java; no AWS
+.venv/bin/python etl_v2/tests/test_parse_local.py
+
+# Standard-library synthetic feature reference
+.venv/bin/python realtime/tests/test_local.py
+
+# BQ2 paths and saved-summary reproducibility; no AWS
+.venv/bin/python -m pytest tests/unit/test_bq2_evaluation_paths.py -q
+```
+
+The handler/explainer tests use fake services and models; the session-helper test
+requires Moto. An unavailable local dependency is not evidence that a cloud
+pipeline test passed. Historical measured metrics above are preserved, not
+regenerated by the repository organisation.

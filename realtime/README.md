@@ -63,7 +63,7 @@ Left in place between sessions: DynamoDB storage (about 0.4 GB, about US$0.10 a 
 | Tagged, teardown run, stream gone | Done |
 | Cost recorded | Done: about US$3 |
 
-## Run a session (CloudShell, folder `~/rt`)
+## Run a session (from `realtime/` or an equivalent CloudShell copy)
 
 ```bash
 python3 bootstrap.py 2022-09-16T01:00:00 2022-09-16T02:00:00 s0116h1      # slice + starting state + v2 Gold for comparison (read-only Athena)
@@ -83,14 +83,14 @@ python3 validate_rt.py check <run_id> rtdata/s0116h1                        # pa
 python3 session.py stop                                                    # always
 ```
 
-The offline gate needs `rtdata/model.ubj` and `rtdata/feature_schema.json` (copy them from `exported/etl-v2/`).
+The offline gate needs `rtdata/model.ubj` and `rtdata/feature_schema.json` from the frozen project assets in S3. The scorer pins their SHA-256 values in `app.py`; the checked-in LI-Small model is not a substitute. Container examples using `$HOME/rt/rtdata` assume the historical CloudShell layout; change that host bind mount to your actual `realtime/rtdata` directory.
 
 To continue with the next slice without resetting, bootstrap it, then `python3 state_check.py rtdata/<next_tag> --load-missing`: it checks the live state of accounts already seen against Silver and preloads only accounts the stream has not touched. Add `"--spread":"1"` to the producer arguments to spread each minute's rows across the minute (realistic arrival). Rerunning a slice already processed needs empty tables, because state has advanced and every transaction is marked seen.
 
 ## Tests
 
-- `test_local.py`: engine vs brute-force Spark window semantics on synthetic data with same-minute ties (0 mismatches).
-- `test_handler.py`: handler against an in-memory DynamoDB with an injected crash mid-batch, the Lambda retry and a re-send of 300 records; final state and features identical to one clean pass.
+- `tests/test_local.py`: engine vs brute-force Spark window semantics on synthetic data with same-minute ties (0 mismatches).
+- `tests/test_handler.py`: handler against an in-memory DynamoDB with an injected crash mid-batch, the Lambda retry and a re-send of 300 records; final state and features identical to one clean pass.
 - `offline_gate.py`: go/no-go on real data inside the scorer image, against v2 Gold, before any streaming resource is built.
 
 ## Teardown
@@ -160,3 +160,33 @@ A fine-tuned Qwen2.5-1.5B (Apache 2.0, Q4_K_M GGUF, about 0.9 GB) in Lambda `is4
 - Schedule tested on 25 Oct: `deploy_session.py schedule` fired the state machine at the set minute; `deploy_session.py disable` afterwards.
 - Scheduled session on 25 Oct (EventBridge fired at 17:10:01 UTC, slice 03:35 to 03:50, fresh): PASSED, 30,234 rows, parity 0 mismatches / 0.0, 0 alerts, teardown clean, US$0.81. Latency p50 2.0 s but p95 27.7 s (the first, 03:20 session had p95 2.1 s); worth watching, likely cold starts while the explainer evaluation ran in parallel.
 - Rollback tested on 25 Oct: `deploy_explainer.py rollback 1` moved `live` to version 1 (model-picks-typology build), `rollback 2` moved it back. `candidate` reset to 2 after the negative test (version 3 = base model, never live).
+
+## Local structure and deployment contracts
+
+Local regression scripts are grouped under [tests](tests/README.md). Both
+`release.py` and direct test commands use their new paths; the scorer handler
+test still imports the synthetic generator from `tests/test_local.py`.
+
+Runtime and deployment files deliberately stay together:
+
+| Files | Path dependency |
+|---|---|
+| `app.py`, `rt_core.py`, `bootstrap_logic.py`, `offline_gate.py` | Scorer Dockerfile COPY and `app.handler`; offline gate executes inside that image |
+| `explainer_app.py`, `explainer_common.py` | Explainer Dockerfile COPY and `explainer_app.handler`; common code is also used by export/training/evaluation |
+| `eval_explainer.py` | `release.py` invokes it directly during the promotion gate |
+| `explainer_export.py`, `kaggle_explainer.py`, `kaggle_links.py` | Coupled export/Kaggle handoff commands and shared imports; retained as the documented model workflow |
+| `deploy_*.py`, `release.py`, `session*.py`, `rt_control.py` | Shell commands, ZIP packaging, local source reads and Lambda handler names assume this directory |
+| `bootstrap.py`, `load_state.py`, `state_check.py`, `validate_rt.py`, `rt_producer.py`, `cost_rt.py` | Session/control uploads and command entry points use these filenames |
+
+Use `realtime/` as the Docker build context (`docker build ... .`) and working
+directory for operational commands. Moving these files would require changing
+image or upload contracts rather than simply grouping supporting files.
+
+The source is now in this checkout. Deployment still requires project-specific
+AWS resources and source/model data: the pinned frozen XGBoost model/schema,
+Qwen GGUF, classifier and metadata, replay bootstrap files, teacher references
+and baseline comparison objects. These are S3/Kaggle or run artefacts, not all
+checked in. Root requirements support Streamlit, not the complete training or
+container inference environment. The Dockerfiles define inference dependencies;
+release, deployment and live evaluation incur charges and must not be used as
+an offline validation command. No continuous production stream is claimed.

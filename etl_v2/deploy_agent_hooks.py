@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Section 5 of ETL_Final_Plan.md: the hooks the daily pipeline exposes for the AI agent. Run from CloudShell.
+"""Historical agent integration (docs/decisions.md): the hooks the daily pipeline exposes for the AI agent. Run from CloudShell.
 
   python3 deploy_agent_hooks.py all       # views + decisions table + day-ready trigger + agent read policy
   python3 deploy_agent_hooks.py views     # only (re)create the label-free Athena views

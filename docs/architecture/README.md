@@ -17,7 +17,7 @@ the label-free investigation path.
 
 Scores and edges are Hive Parquet partitioned by `txn_date`, with 32 buckets
 by transaction ID and account key respectively; the daily queue is partitioned
-but not bucketed. Silver Iceberg belongs to the external ETL, not these agent
+but not bucketed. Silver Iceberg belongs to [ETL v2](../../etl_v2/docs/runbook.md), not these agent
 tables. Athena cannot insert into bucketed tables, so extending coverage requires
 a rebuild rather than an append. Current date coverage follows `AGENT_LAST_DAY`
 (default 16 September 2022); edges include the 72-hour lookback from 11 September.
@@ -82,15 +82,17 @@ ranks and started investigation, but stopped at the model's daily token quota
 before saving. A fully saved new-day run therefore remains unverified. Existing
 14–16 September saved results and evaluation evidence remain available.
 
-The external ETL is tailored to LI-Medium: its audit reads the source file for
+The ETL is tailored to LI-Medium: its audit reads the source file for
 each day and its BQ1 parity check depends on v1 output. Larger datasets need
 source/table changes and re-evaluation. Real-time processing was demonstrated on
 historical replay slices, not continuous production traffic. Its writers and
-session lifecycle are external; Streamlit displays persisted Qwen outputs and
+session lifecycle are implemented in [realtime](../../realtime/README.md); Streamlit displays persisted Qwen outputs and
 does not launch streaming or agent investigation from that page. The optional
 recent-alert index was not deployed and is unnecessary for saved-replay browsing.
 
 This checkout scripts deployment of the agent batch using AWS CLI, an existing
 ETL event rule, existing Gold/S3 resources and a default VPC. It is not a complete
 platform deployment package. ETL jobs, BQ1 training/feature engineering and
-real-time Lambda writers/infrastructure must come from their owning projects.
+real-time writers are now included, but historical Glue templates, original
+source data, frozen production model assets and existing project AWS resources
+are still required. See the [ETL prerequisites](../../etl_v2/docs/runbook.md#working-directory-and-deployment-dependencies).

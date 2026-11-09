@@ -31,8 +31,9 @@ Deployment requires Docker, AWS CLI credentials, existing Gold and explanation
 sources, S3 data/query-output locations, Glue catalog, the existing ETL success
 rule, a usable default VPC and model access. Review the account, region, network
 and resource constants in `deploy.sh` before deploying to another environment.
-The script deploys the agent batch only; external ETL, BQ1 training and real-time
-writers are not included. CLI deployment is not a complete declarative platform
+The script deploys the agent batch only; ETL, BQ1 training and real-time
+sources are in the sibling `etl_v2/`, `src/bq1/` and `realtime/` directories. This
+agent deployment script does not deploy those components. CLI deployment is not a complete declarative platform
 stack. `destroy.sh` removes the agent resources managed by this package.
 
 The rebuild role is separate from the investigation role because rebuilding reads

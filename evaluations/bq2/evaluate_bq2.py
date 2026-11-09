@@ -19,7 +19,8 @@ from botocore.exceptions import (
 AWS_REGION = "us-east-1"
 S3_BUCKET = "is459-aml-g1t5"
 S3_KEY = "bronze/ibm-aml/li-medium/patterns/LI-Medium_Patterns.txt"
-OUTPUT_PATH = Path("bq2_random_evaluation_cases.csv")
+EVAL_DIR = Path(__file__).resolve().parent
+OUTPUT_PATH = EVAL_DIR / "bq2_random_evaluation_cases.csv"
 
 RANDOM_HEADER_PREFIX = "BEGIN LAUNDERING ATTEMPT - RANDOM"
 RANDOM_END_MARKER = "END LAUNDERING ATTEMPT - RANDOM"

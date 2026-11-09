@@ -5,9 +5,12 @@ results measure recovery of synthetic labels, not real-world detection.
 
 ## Scope and data
 
-Feature engineering, model training and model artefacts are maintained outside
-this repository. Historical source/artefact names below refer to that external
-project. Current batch Gold tables are `is459_aml_gold.bq1_risk_scores_medium_v2`
+Feature engineering, training/scoring, packaging and saved LI-Small model/results
+are now included in [src/bq1](../../src/bq1/). Medium tail results are under
+[src/bq1/results/medium_tail](../../src/bq1/results/medium_tail/). Original Silver
+data and the deployed frozen Medium model/schema remain external. Historical
+source names below describe the original experiments; the imported files live
+under `src/bq1/`. Current batch Gold tables are `is459_aml_gold.bq1_risk_scores_medium_v2`
 and `bq1_features_medium_v2`; the retained `src/bq1` serving helper and historical
 BQ1 SQL still target v1. The dashboard's agent queue uses label-free v2 tables.
 Ready-made historical queries: [BQ1 SQL](../../sql/bq1/BQ1_athena_queries.sql).
@@ -35,7 +38,7 @@ mean are null. Distinct-counterparty counts use first-pair occurrence followed
 by a strictly earlier running sum. Features can be computed before excluding the
 tail because later rows cannot affect earlier features.
 
-The external LI-Small checks preserved all 6,924,049 distinct IDs, matched 20/20
+The historical LI-Small checks preserved all 6,924,049 distinct IDs, matched 20/20
 random brute-force recomputations (seed 42), and reproduced all earlier features
 when later transactions were removed (3,462,207 retained rows; relative tolerance
 1e-9). Glue parity reproduced the full LI-Small local features. LI-Medium Glue
@@ -67,8 +70,8 @@ Features are computed per transaction in time order. "Earlier" always means stri
 | `amt_vs_ccy_median` | Added at training time: `log_amount_paid` minus the typical (median) value for that currency in the training days. Shows whether the amount is large or small for its currency. |
 
 That makes 27 model inputs: 26 stored features plus train-fitted
-`amt_vs_ccy_median`. Model artefacts and training source are external to this
-checkout; this repository contains serving and evaluation integration.
+`amt_vs_ccy_median`. Training source and Small model artefacts are included;
+original training data and frozen deployed Medium assets remain external.
 
 ## Model selection on LI-Small
 
@@ -84,7 +87,7 @@ checkout; this repository contains serving and evaluation integration.
   - Tuning (extra, requested by the user, validation only): staged search over `scale_pos_weight` {5, 10, 20, 47.9}, then `max_depth` {4, 8},
     `min_child_weight` {5, 20}, `reg_lambda` {10, 50}; a change was kept only for a gain of at least 1% relative on validation PR-AUC.
     Chosen: **`scale_pos_weight` 5, `max_depth` 8, `min_child_weight` 20**. Val PR-AUC 0.2438 to 0.2662; best iteration 74.
-    The tuning log belongs to the external training project. These LI-Small settings are reused for LI-Medium without re-tuning.
+    The tuning log is [included here](../../src/bq1/results/small/xgb_tuning_log.csv). These LI-Small settings are reused for LI-Medium without re-tuning.
   - Early stopping uses the validation split, so validation PR-AUC is slightly optimistic.
 - **v2 features (T2.10) tried and not adopted.** Added `snd_in_cnt_24h`, `snd_secs_since_last_in`, `rcv_out_cnt_24h` from a long account-events table.
   Verified (brute force 40/40, truncation test clean) but no real gain (tuned XGBoost test PR-AUC 0.2195 vs 0.2191). v1 stays production.
@@ -128,7 +131,7 @@ explanations rather than the measured ranking performance.
 **Question.** The tail days (17 to 27 Sep: 1,370 rows, 771 positives, laundering rate 56%) are excluded from every split (section 5, T7.3) and appear in Gold as `data_split = 'excluded'`.
 They come after the test window, so the model never saw them and their scores are out of sample. How does the model rank them? This is a separate report; the split, the models and the headline numbers did not change.
 **Method.** Rank arithmetic ran in Athena over `bq1_risk_scores_medium_v1` (rank = score descending, ties by `transaction_id`); only small tables came back (`scripts/epic9_tail.py`, `scripts/epic9_features.py`, `scripts/epic9_chart.py`).
-Supporting files named in this section belong to the external BQ1 training project, not this checkout. The in-SQL recomputation of the headline reproduced T7.5 exactly (Recall@1% 0.6343, PR-AUC 0.2394), which checks the arithmetic.
+Supporting files named in this section are now in [the Medium tail results](../../src/bq1/results/medium_tail/). The in-SQL recomputation of the headline reproduced T7.5 exactly (Recall@1% 0.6343, PR-AUC 0.2394), which checks the arithmetic.
 
 **T9.1.** 1,370 rows, 771 positives, 11 dates; per-date counts match the T7.3 daily table.
 
